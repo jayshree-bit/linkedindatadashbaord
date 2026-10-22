@@ -557,19 +557,21 @@ export default function DataGridPage({ resource, title, fields }) {
       renderCell: ({ rowIdx }) => <span className="text-muted">{offset + rowIdx + 1}</span>,
     };
 
-    const dataCols = orderedFields
-      .filter((field) => visibleKeys.includes(field.key))
-      .map((field) => ({
-        key: field.key,
-        name: field.name,
-        minWidth: 150,
-        width: 180,
-        resizable: true,
-        sortable: false, // handled by our custom header
-        renderHeaderCell: (props) => <HeaderCell {...props} />,
-        renderCell: renderFor(field.key),
-        renderEditCell: canEdit ? textEditor : undefined,
-      }));
+   
+const dataCols = orderedFields
+  .filter((field) => visibleKeys.includes(field.key))
+  .map((field) => ({
+    key: field.key,
+    name: field.name,
+    minWidth: 180,
+    width: 220,
+    resizable: true,
+    sortable: false,
+    renderHeaderCell: (props) => <HeaderCell {...props} />,
+    renderCell: renderFor(field.key),
+    renderEditCell: canEdit ? textEditor : undefined,
+  }));
+
 
     const result = [rowNumber, ...dataCols];
     return result;

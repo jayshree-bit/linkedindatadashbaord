@@ -2,6 +2,8 @@ import { Router } from "express";
 import { authenticate, authorize } from "../middleware/auth.js";
 import * as users from "../controllers/user.controller.js";
 import * as data from "../controllers/data.controller.js";
+import multer from 'multer';
+import { importProspectsExcel } from '../controllers/data.controller.js';
 
 const r = Router();
 r.use(authenticate); // everything below needs a valid token
@@ -27,4 +29,25 @@ r.get(
   "/data/:resource/distinct/:field",
   authorize(resource, action),
   data.distinctValues
-);export default r;
+);
+const excelUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (!/\.xlsx$/i.test(file.originalname)) {
+      return cb(new Error('Upload an .xlsx file.'));
+    }
+
+    cb(null, true);
+  },
+});
+
+r.post(
+  '/data/prospect/import-excel',
+  authorize('prospect', 'edit'),
+  excelUpload.single('file'),
+  importProspectsExcel
+);
+
+
+export default r;
