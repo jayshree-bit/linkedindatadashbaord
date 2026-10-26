@@ -1,34 +1,53 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 
+
 export const authenticate = async (req, res, next) => {
   try {
-    const token = req.cookies?.token;
+    // Prefer the Authorization Bearer token; fall back to the cookie.
+    const authHeader = req.headers.authorization;
+
+    const bearerToken =
+      authHeader?.startsWith('Bearer ')
+        ? authHeader.slice(7).trim()
+        : null;
+
+    const token = bearerToken || req.cookies?.token;
 
     if (!token) {
       return res.status(401).json({
-        message: "Login required",
+        message: 'Login required. Provide a Bearer token or login cookie.',
       });
     }
 
-    const { id } = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    const user = await User.findById(id).populate("role");
+    if (!decoded.id) {
+      return res.status(401).json({
+        message: 'Invalid token payload',
+      });
+    }
+
+    const user = await User.findById(decoded.id).populate('role');
 
     if (!user) {
       return res.status(401).json({
-        message: "User not found",
+        message: 'User not found',
       });
     }
 
     req.user = user;
     next();
-  } catch {
+  } catch (error) {
     return res.status(401).json({
-      message: "Invalid or expired token",
+      message:
+        error.name === 'TokenExpiredError'
+          ? 'Token expired. Please log in again.'
+          : 'Invalid or expired token',
     });
   }
 };
+
 
 // authorize('user', 'edit')  or  authorize(req => resource, req => action)
 export const authorize = (resource, action) => (req, res, next) => {

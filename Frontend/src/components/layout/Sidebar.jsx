@@ -1,20 +1,46 @@
-
-import { NavLink } from 'react-router-dom';
+import { useState } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import { can } from '../../features/authSlice';
 
 const navigation = [
   {
     label: 'OVERVIEW',
     items: [
-      { name: 'Dashboard', path: '/dashboard', icon: '▦', resource: null },
+      {
+        name: 'Dashboard',
+        path: '/dashboard',
+        icon: '▦',
+        resource: null,
+      },
     ],
   },
   {
     label: 'WORKSPACE',
     items: [
-      { name: 'Prospects', path: '/prospects', icon: '♙', resource: 'prospect' },
-      { name: 'Companies', path: '/companies', icon: '▤', resource: 'company' },
-      { name: 'User management', path: '/users', icon: '♧', resource: 'user' },
+      {
+        name: 'Prospects',
+        path: '/prospects',
+        icon: '♙',
+        resource: 'prospect',
+        children: [
+          { name: 'Dashboard', path: '/prospects/dashbaord' },
+          { name: 'All Prospects', path: '/prospects/viewall' },
+        
+        
+        ],
+      },
+      {
+        name: 'Companies',
+        path: '/companies',
+        icon: '▤',
+        resource: 'company',
+      },
+      {
+        name: 'User management',
+        path: '/users',
+        icon: '♧',
+        resource: 'user',
+      },
     ],
   },
 ];
@@ -26,6 +52,19 @@ export default function Sidebar({
   mini,
   onToggleMini,
 }) {
+  const location = useLocation();
+
+  const [expandedMenus, setExpandedMenus] = useState({
+    Prospects: true,
+  });
+
+  const toggleSubmenu = (name) => {
+    setExpandedMenus((previous) => ({
+      ...previous,
+      [name]: !previous[name],
+    }));
+  };
+
   return (
     <>
       {isOpen && (
@@ -91,10 +130,15 @@ export default function Sidebar({
         </div>
 
         {/* Navigation */}
-        <div className={`flex-1 overflow-y-auto py-6 ${mini ? 'px-2' : 'px-3'}`}>
+        <div
+          className={`flex-1 overflow-y-auto py-6 ${
+            mini ? 'px-2' : 'px-3'
+          }`}
+        >
           {navigation.map((group) => {
             const visibleItems = group.items.filter(
-              (item) => !item.resource || can(user, item.resource, 'view')
+              (item) =>
+                !item.resource || can(user, item.resource, 'view')
             );
 
             if (!visibleItems.length) return null;
@@ -108,29 +152,124 @@ export default function Sidebar({
                 )}
 
                 <nav className="space-y-1">
-                  {visibleItems.map((item) => (
-                    <NavLink
-                      key={item.path}
-                      to={item.path}
-                      onClick={onClose}
-                      title={mini ? item.name : undefined}
-                      className={({ isActive }) =>
-                        `flex items-center rounded-lg border py-2.5 text-sm font-medium transition-colors
-                        ${mini ? 'justify-center px-2' : 'gap-3 px-3'}
-                        ${
-                          isActive
-                            ? 'border-indigo-100 bg-indigo-50 text-indigo-700 dark:border-indigo-400/30 dark:bg-indigo-500/15 dark:text-indigo-300'
-                            : 'border-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-white'
-                        }`
-                      }
-                    >
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-lg">
-                        {item.icon}
-                      </span>
+                  {visibleItems.map((item) => {
+                    const hasChildren = Boolean(
+                      item.children?.length
+                    );
 
-                      {!mini && <span className="truncate">{item.name}</span>}
-                    </NavLink>
-                  ))}
+                    const isExpanded =
+                      expandedMenus[item.name] ||
+                      item.children?.some(
+                        (child) => child.path === location.pathname
+                      );
+
+                    const isParentActive = hasChildren
+                      ? item.children.some(
+                          (child) => child.path === location.pathname
+                        )
+                      : location.pathname === item.path;
+
+                    return (
+                      <div key={item.path}>
+                        <div
+                          className={`flex items-center rounded-lg border
+                            transition-colors
+                            ${
+                              isParentActive
+                                ? 'border-indigo-100 bg-indigo-50 text-indigo-700 dark:border-indigo-400/30 dark:bg-indigo-500/15 dark:text-indigo-300'
+                                : 'border-transparent text-slate-600 dark:text-slate-300'
+                            }`}
+                        >
+                          {hasChildren ? (
+                            <button
+                              type="button"
+                              title={mini ? item.name : undefined}
+                              onClick={() => {
+                                if (mini) {
+                                  onToggleMini();
+                                  return;
+                                }
+                                toggleSubmenu(item.name);
+                              }}
+                              className={`flex min-w-0 flex-1 items-center py-2.5 text-left text-sm font-medium
+                                hover:text-indigo-600 dark:hover:text-indigo-400
+                                ${
+                                  mini
+                                    ? 'justify-center px-2'
+                                    : 'gap-3 px-3'
+                                }`}
+                            >
+                              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-lg">
+                                {item.icon}
+                              </span>
+
+                              {!mini && (
+                                <>
+                                  <span className="flex-1 truncate">
+                                    {item.name}
+                                  </span>
+                                  <span
+                                    className={`text-xs transition-transform ${
+                                      isExpanded ? 'rotate-90' : ''
+                                    }`}
+                                  >
+                                    ›
+                                  </span>
+                                </>
+                              )}
+                            </button>
+                          ) : (
+                            <NavLink
+                              to={item.path}
+                              onClick={onClose}
+                              title={mini ? item.name : undefined}
+                              className={`flex min-w-0 flex-1 items-center py-2.5 text-sm font-medium
+                                ${
+                                  mini
+                                    ? 'justify-center px-2'
+                                    : 'gap-3 px-3'
+                                }`}
+                            >
+                              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-lg">
+                                {item.icon}
+                              </span>
+                              {!mini && (
+                                <span className="truncate">
+                                  {item.name}
+                                </span>
+                              )}
+                            </NavLink>
+                          )}
+                        </div>
+
+                        {/* Submenu */}
+                        {hasChildren && !mini && isExpanded && (
+                          <div className="ml-6 mt-1 space-y-1 border-l border-slate-200 pl-4 dark:border-slate-700">
+                            {item.children.map((child) => (
+                              <NavLink
+                                key={child.path}
+                                to={child.path}
+                                onClick={onClose}
+                                end
+                                className={({ isActive }) =>
+                                  `flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                                    isActive
+                                      ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300'
+                                      : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white'
+                                  }`
+                                }
+                              >
+                                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
+                                <span className="truncate">
+                                  {child.name}
+                                </span>
+                              </NavLink>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </nav>
               </div>
             );

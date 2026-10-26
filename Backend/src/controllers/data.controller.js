@@ -1,67 +1,234 @@
 import ExcelJS from "exceljs";
 import * as svc from "../services/data.service.js";
-import Prospect from '../models/Prospect.js';
-
-
+import Prospect from "../models/Prospect.js";
+import { randomUUID } from "crypto";
+import User from '../models/User.js';
+import mongoose from 'mongoose';
+/* ====================================================================
+   Excel header -> Prospect schema field
+   ==================================================================== */
 const PROSPECT_COLUMN_MAP = {
-  'employee code': 'employeeCode',
-  'employee name': 'employeeName',
-  date: 'date',
-  campaign: 'campaign',
+  "employee code": "employeeCode",
+  "employee name": "employeeName",
+  date: "date",
+  campaign: "campaign",
 
-  'first name': 'firstName',
-  'last name': 'lastName',
-  'company name': 'companyName',
-  'email address': 'emailAddress',
-  'specific title': 'specificTitle',
-  'job level': 'jobLevel',
-  'job role': 'jobRole',
-  'phone number': 'phoneNumber',
+  "first name": "firstName",
+  "last name": "lastName",
+  "company name": "companyName",
+  "email address": "emailAddress",
+  "specific title": "specificTitle",
+  "job level": "jobLevel",
+  "job role": "jobRole",
+  "phone number": "phoneNumber",
 
-  'address 1': 'address1',
-  'address 2': 'address2',
-  'city': 'city',
-  'state': 'state',
-  'zipcode': 'zipcode',
-  'country': 'country',
+  "address 1": "address1",
+  "address 2": "address2",
+  city: "city",
+  state: "state",
+  zipcode: "zipcode",
+  country: "country",
 
-  'main industry': 'mainIndustry',
-  'industry': 'industry',
-  'sub industry': 'industry',
-  'see all employee size': 'seeAllEmployeeSize',
-  'employee size': 'employeeSize',
-  'exact revenue': 'exactRevenue',
-  'revenue': 'revenue',
+  "main industry": "mainIndustry",
+  industry: "industry",
+  "sub industry": "industry",
+  "see all employee size": "seeAllEmployeeSize",
+  "employee size": "employeeSize",
+  "exact revenue": "exactRevenue",
+  revenue: "revenue",
 
-  'company domain': 'companyDomain',
-  'website': 'website',
-  'company linkedin url': 'companyLinkedinUrl',
-  'linkedin profile link': 'linkedinProfileLink',
-  'linkedin profile link sn': 'linkedinProfileLinkSN',
-  'revenue link': 'revenueLink',
+  "company domain": "companyDomain",
+  website: "website",
+  "company linkedin url": "companyLinkedinUrl",
+  "linkedin profile link": "linkedinProfileLink",
+  "linkedin profile link sn": "linkedinProfileLinkSN",
+  "revenue link": "revenueLink",
 
-  'sic code': 'sicCode',
-  'naics code': 'naicsCode',
-  'prospect tenure': 'prospectTenure',
-  'ra comments': 'raComment',
-  'ra comment': 'raComment',
-  'address link': 'addressLink',
-  'call notes': 'callNotes',
-  'dispositions': 'dispositions',
+  "sic code": "sicCode",
+  "naics code": "naicsCode",
+  "prospect tenure": "prospectTenure",
+  "ra comments": "raComment",
+  "ra comment": "raComment",
+  "address link": "addressLink",
+  "call notes": "callNotes",
+  dispositions: "dispositions",
 
-  'note1': 'note1',
-  'note2': 'note2',
-  'note3': 'note3',
+  note1: "note1",
+  note2: "note2",
+  note3: "note3",
 
-  'status': 'status',
-  'primary reason': 'primaryReason',
-  'qa comment': 'qaComment',
-  'ebb status': 'ebbStatus',
-  'auditor name': 'auditorName',
-  'audit date': 'auditDate',
+  status: "status",
+  "primary reason": "primaryReason",
+  "qa comment": "qaComment",
+  "ebb status": "ebbStatus",
+  "auditor name": "auditorName",
+  "audit date": "auditDate",
 };
 
+export const getProspectDashboardStats = async (req, res, next) => {
+  try {
+    const { userId } = req.query;
 
+    // Validate selected user ID
+    if (userId && !mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid user ID',
+      });
+    }
+
+    // Global prospect counts
+    const globalCountsPromise = Prospect.aggregate([
+      {
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          qualified: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'Qualified'] }, 1, 0],
+            },
+          },
+          disqualified: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'DisQualified'] }, 1, 0],
+            },
+          },
+        },
+      },
+    ]);
+
+    // Users for the sidebar
+    const usersPromise = User.find()
+      .select('_id name email')
+      .sort({ name: 1 })
+      .lean();
+
+    // Counts grouped by uploadedBy
+    const userCountsPromise = Prospect.aggregate([
+      {
+        $match: {
+          uploadedBy: { $ne: null },
+        },
+      },
+      {
+        $group: {
+          _id: '$uploadedBy',
+          total: { $sum: 1 },
+          qualified: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'Qualified'] }, 1, 0],
+            },
+          },
+          disqualified: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'DisQualified'] }, 1, 0],
+            },
+          },
+        },
+      },
+    ]);
+
+    const [globalCounts, users, userCounts] = await Promise.all([
+      globalCountsPromise,
+      usersPromise,
+      userCountsPromise,
+    ]);
+
+    const global = globalCounts[0] || {
+      total: 0,
+      qualified: 0,
+      disqualified: 0,
+    };
+
+    const countsByUser = new Map(
+      userCounts.map((item) => [
+        item._id.toString(),
+        {
+          total: item.total,
+          qualified: item.qualified,
+          disqualified: item.disqualified,
+        },
+      ])
+    );
+
+    const userList = users.map((user) => ({
+      _id: user._id,
+      name: user.name || user.email || 'Unnamed user',
+      email: user.email || '',
+      stats: countsByUser.get(user._id.toString()) || {
+        total: 0,
+        qualified: 0,
+        disqualified: 0,
+      },
+    }));
+
+    let selectedStats = global;
+    let selectedUser = null;
+
+    // Empty lists when no user is selected
+    let qualifiedList = [];
+    let disqualifiedList = [];
+
+    if (userId) {
+      selectedUser =
+        userList.find(
+          (user) => user._id.toString() === userId
+        ) || null;
+
+      if (!selectedUser) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found',
+        });
+      }
+
+      selectedStats = selectedUser.stats;
+
+      // Fetch only this user's qualified and disqualified prospects
+      const [qualifiedRecords, disqualifiedRecords] =
+        await Promise.all([
+          Prospect.find({
+            uploadedBy: userId,
+            status: 'Qualified',
+          })
+            .sort({ createdAt: -1 })
+            .lean(),
+
+          Prospect.find({
+            uploadedBy: userId,
+            status: 'DisQualified',
+          })
+            .sort({ createdAt: -1 })
+            .lean(),
+        ]);
+
+      qualifiedList = qualifiedRecords;
+      disqualifiedList = disqualifiedRecords;
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        global: {
+          total: global.total,
+          qualified: global.qualified,
+          disqualified: global.disqualified,
+        },
+        selectedUser,
+        stats: selectedStats,
+        users: userList,
+        qualifiedList,
+        disqualifiedList,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* ====================================================================
+   Generic CRUD handlers
+   ==================================================================== */
 const wrap = (fn) => async (req, res, next) => {
   try {
     res.json(await fn(req));
@@ -72,6 +239,7 @@ const wrap = (fn) => async (req, res, next) => {
 
 // req.query carries page, limit, search, sortBy, sortOrder and filters.
 export const getAll = wrap((req) => svc.list(req.params.resource, req.query));
+
 
 export const add = wrap((req) => svc.create(req.params.resource, req.body));
 
@@ -89,7 +257,9 @@ export const distinctValues = wrap((req) =>
   svc.distinct(req.params.resource, req.params.field, req.query),
 );
 
-/* ---------- Excel export (streams .xlsx, respects search + sort + column filters) ---------- */
+/* ====================================================================
+   Excel export (streams .xlsx, respects search + sort + column filters)
+   ==================================================================== */
 const MAX_EXPORT_ROWS = 100000;
 
 const toCell = (value) => {
@@ -196,191 +366,396 @@ export const exportExcel = async (req, res, next) => {
   }
 };
 
+/* ====================================================================
+   Excel import (Prospects)
+   ==================================================================== */
+const ALLOWED_STATUSES = ["Qualified", "DisQualified"];
+const INSERT_CHUNK = 1000;
+const LOOKUP_CHUNK = 5000;
+const importJobs = new Map();
+const JOB_TTL_MS = 30 * 60 * 1000;
+const updateJob = (job, patch) =>
+  Object.assign(job, patch, { updatedAt: Date.now() });
+const scale = (from, to, done, total) =>
+  total > 0 ? Math.round(from + ((to - from) * done) / total) : to;
 
 const normalizeHeader = (value) =>
-  String(value ?? '').trim().toLowerCase();
+  String(value ?? "")
+    .trim()
+    .toLowerCase();
+
+const normalizeEmail = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase();
+
+const normalizeLinkedIn = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\/+$/, "");
 
 function getExcelValue(cell) {
   const value = cell.value;
 
-  if (value == null) return '';
+  if (value == null) return "";
 
   if (value instanceof Date) {
     return value.toISOString().slice(0, 10);
   }
 
-  if (typeof value === 'object') {
+  if (typeof value === "object") {
     if (value.hyperlink) return value.hyperlink;
     if (value.richText) {
-      return value.richText.map((part) => part.text).join('');
+      return value.richText.map((part) => part.text).join("");
     }
     if (value.text != null) return value.text;
     if (value.result != null) return value.result;
-    return '';
+    return "";
   }
 
   return value;
 }
-const ALLOWED_STATUSES = ['Qualified', 'DisQualified'];
 
-const normalizeEmail = (value) =>
-  String(value || '').trim().toLowerCase();
+const chunk = (arr, size) => {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+};
 
-const normalizeLinkedIn = (value) =>
-  String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\/+$/, '');
+// ordered:false keeps going on bad rows; a BulkWriteError still reports what got in.
+const insertInChunks = async (docs, onChunk) => {
+  let inserted = 0;
+  let done = 0;
+  const errors = [];
 
-export async function importProspectsExcel(req, res, next) {
+  for (const part of chunk(docs, INSERT_CHUNK)) {
+    try {
+      const res = await Prospect.insertMany(part, { ordered: false });
+      inserted += res.length;
+    } catch (err) {
+      inserted += err.insertedDocs?.length || 0;
+      errors.push(err.message);
+    }
+    done += part.length;
+    onChunk?.(done);
+  }
+
+  return { inserted, errors };
+};
+
+// Reads the first sheet and maps headers -> schema fields.
+async function parseProspectsFromBuffer(buffer) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+
+  const sheet = workbook.worksheets[0];
+  if (!sheet) return [];
+
+  // Header row -> { colNumber: fieldName }
+  const colToField = {};
+  sheet.getRow(1).eachCell({ includeEmpty: false }, (cell, colNumber) => {
+    const field = PROSPECT_COLUMN_MAP[normalizeHeader(getExcelValue(cell))];
+    if (field) colToField[colNumber] = field;
+  });
+
+  if (!Object.keys(colToField).length) return [];
+
+  const prospects = [];
+
+  sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber === 1) return;
+
+    const prospect = {};
+    let hasData = false;
+
+    for (const [colNumber, field] of Object.entries(colToField)) {
+      let value = getExcelValue(row.getCell(Number(colNumber)));
+      if (typeof value === "string") value = value.trim();
+      if (field === "emailAddress") {
+        value = String(value).replace(/^mailto:/i, "");
+      }
+      if (value !== "" && value != null) {
+        prospect[field] = String(value);
+        hasData = true;
+      }
+    }
+
+    if (hasData) prospects.push(prospect);
+  });
+
+  return prospects;
+}
+
+// Looks up existing prospects in batches so huge $in lists stay fast.
+async function findExisting(emails, linkedinUrls, onStep) {
+  const existingEmails = new Set();
+  const existingLinkedIn = new Set();
+
+  const emailParts = chunk(emails, LOOKUP_CHUNK);
+  const urlParts = chunk(linkedinUrls, LOOKUP_CHUNK);
+  const totalSteps = emailParts.length + urlParts.length;
+  let step = 0;
+
+  for (const part of emailParts) {
+    const docs = await Prospect.find(
+      { emailAddress: { $in: part } },
+      { emailAddress: 1 },
+    ).lean();
+    docs.forEach((d) => existingEmails.add(normalizeEmail(d.emailAddress)));
+    onStep?.(++step, totalSteps);
+  }
+
+  for (const part of urlParts) {
+    const docs = await Prospect.find(
+      { linkedinProfileLink: { $in: part } },
+      { linkedinProfileLink: 1 },
+    ).lean();
+    docs.forEach((d) =>
+      existingLinkedIn.add(normalizeLinkedIn(d.linkedinProfileLink)),
+    );
+    onStep?.(++step, totalSteps);
+  }
+
+  return { existingEmails, existingLinkedIn };
+}
+
+// Adjust to your auth middleware: it must expose the logged-in user's id and display name.
+const getUploader = (req) => {
+  const u = req.user || {};
+  return {
+    id: u._id || u.id || u.userId || null,
+    name: u.name || u.fullName || u.employeeName || u.username || "",
+    code: u.employeeCode || "",
+  };
+};
+
+async function runImportJob(job, { buffer, selectedStatus, uploader }) {
   try {
-    const selectedStatus = String(req.body.status || '').trim();
+    updateJob(job, {
+      stage: "Reading file",
+      percent: 3,
+      processed: null,
+      total: null,
+    });
 
-    if (!ALLOWED_STATUSES.includes(selectedStatus)) {
-      return res.status(400).json({
-        message: 'Select Qualified or DisQualified before uploading.',
+    const parsed = await parseProspectsFromBuffer(buffer);
+    if (!parsed.length) {
+      return updateJob(job, {
+        state: "failed",
+        error: "No valid rows or recognised column headers found in the file.",
       });
     }
 
-    if (!req.file) {
-      return res.status(400).json({
-        message: 'Please upload an Excel file.',
-      });
-    }
+    const importBatchId = randomUUID();
 
-    // Keep your existing ExcelJS parsing and column-mapping code here.
-    // It should produce an array named "prospects".
-    //
-    // Example:
-    // const prospects = [
-    //   { firstName: 'Jane', emailAddress: 'jane@example.com', ... }
-    // ];
-
-    // Always use the status selected in the upload form.
-    const rows = prospects.map((prospect) => ({
-      ...prospect,
+    const rows = parsed.map((p) => ({
+      ...p,
+      employeeName: p.employeeName || uploader.name,
+      employeeCode: p.employeeCode || uploader.code,
       status: selectedStatus,
-      emailAddress: normalizeEmail(prospect.emailAddress),
-      linkedinProfileLink: normalizeLinkedIn(
-        prospect.linkedinProfileLink
-      ),
+      uploadedBy: uploader.id,
+      uploadedByName: uploader.label,
+      importBatchId,
+      emailAddress: normalizeEmail(p.emailAddress),
+      linkedinProfileLink: normalizeLinkedIn(p.linkedinProfileLink),
     }));
 
-    // DisQualified: import directly without checking duplicates.
-    if (selectedStatus === 'DisQualified') {
-      const result = await Prospect.insertMany(rows, {
-        ordered: false,
+    updateJob(job, { percent: 10, totalRows: rows.length });
+
+    const summary = {
+      selectedStatus,
+      importBatchId,
+      uploadedBy: uploader.id,
+      employeeName: uploader.name,
+      totalRows: rows.length,
+    };
+
+    /* ---------- DisQualified: no duplicate check ---------- */
+    if (selectedStatus === "DisQualified") {
+      updateJob(job, {
+        stage: "Saving rows",
+        processed: 0,
+        total: rows.length,
       });
 
-      return res.status(200).json({
-        message: 'DisQualified Excel import completed.',
-        selectedStatus,
-        importedCount: result.length,
-        duplicateCheckPerformed: false,
+      const { inserted, errors } = await insertInChunks(rows, (done) =>
+        updateJob(job, {
+          processed: done,
+          percent: scale(10, 99, done, rows.length),
+        }),
+      );
+
+      return updateJob(job, {
+        state: "done",
+        percent: 100,
+        processed: rows.length,
+        result: {
+          message: "DisQualified Excel import completed.",
+          ...summary,
+          importedCount: inserted,
+          failedCount: rows.length - inserted,
+          duplicateCheckPerformed: false,
+          ...(errors.length && { errors: errors.slice(0, 5) }),
+        },
       });
     }
 
-    // Qualified: check existing database records for duplicates.
+    /* ---------- Qualified: skip duplicates ---------- */
+    updateJob(job, {
+      stage: "Checking duplicates",
+      processed: null,
+      total: null,
+    });
+
     const emails = [
-      ...new Set(
-        rows.map((p) => p.emailAddress).filter(Boolean)
-      ),
+      ...new Set(rows.map((p) => p.emailAddress).filter(Boolean)),
     ];
-
     const linkedinUrls = [
-      ...new Set(
-        rows
-          .map((p) => p.linkedinProfileLink)
-          .filter(Boolean)
-      ),
+      ...new Set(rows.map((p) => p.linkedinProfileLink).filter(Boolean)),
     ];
 
-    const duplicateConditions = [];
-
-    if (emails.length) {
-      duplicateConditions.push({
-        emailAddress: { $in: emails },
-      });
-    }
-
-    if (linkedinUrls.length) {
-      duplicateConditions.push({
-        linkedinProfileLink: { $in: linkedinUrls },
-      });
-    }
-
-    const existingRecords = duplicateConditions.length
-      ? await Prospect.find(
-          { $or: duplicateConditions },
-          { emailAddress: 1, linkedinProfileLink: 1 }
-        ).lean()
-      : [];
-
-    const existingEmails = new Set(
-      existingRecords
-        .map((p) => normalizeEmail(p.emailAddress))
-        .filter(Boolean)
+    const { existingEmails, existingLinkedIn } = await findExisting(
+      emails,
+      linkedinUrls,
+      (done, total) => updateJob(job, { percent: scale(10, 30, done, total) }),
     );
 
-    const existingLinkedIn = new Set(
-      existingRecords
-        .map((p) => normalizeLinkedIn(p.linkedinProfileLink))
-        .filter(Boolean)
-    );
-
-    // Also catch duplicate rows within the same Excel file.
     const seenEmails = new Set();
     const seenLinkedIn = new Set();
-
     const uniqueRows = [];
     const duplicates = [];
 
     for (const row of rows) {
-      const email = normalizeEmail(row.emailAddress);
-      const linkedin = normalizeLinkedIn(row.linkedinProfileLink);
+      const email = row.emailAddress;
+      const linkedin = row.linkedinProfileLink;
 
-      const duplicateInDatabase =
+      const inDb =
         (email && existingEmails.has(email)) ||
         (linkedin && existingLinkedIn.has(linkedin));
-
-      const duplicateInFile =
+      const inFile =
         (email && seenEmails.has(email)) ||
         (linkedin && seenLinkedIn.has(linkedin));
 
-      if (duplicateInDatabase || duplicateInFile) {
+      if (inDb || inFile) {
         duplicates.push({
-          firstName: row.firstName || '',
-          lastName: row.lastName || '',
+          firstName: row.firstName || "",
+          lastName: row.lastName || "",
           emailAddress: email,
           linkedinProfileLink: linkedin,
-          reason: duplicateInDatabase
-            ? 'Already exists in database'
-            : 'Duplicate row in uploaded Excel',
+          reason: inDb
+            ? "Already exists in database"
+            : "Duplicate row in uploaded Excel",
         });
-
         continue;
       }
 
       uniqueRows.push(row);
-
       if (email) seenEmails.add(email);
       if (linkedin) seenLinkedIn.add(linkedin);
     }
 
-    const imported = uniqueRows.length
-      ? await Prospect.insertMany(uniqueRows, { ordered: false })
-      : [];
-
-    return res.status(200).json({
-      message: 'Qualified Excel import completed.',
-      selectedStatus,
-      totalRows: rows.length,
-      importedCount: imported.length,
-      duplicateCount: duplicates.length,
-      duplicateCheckPerformed: true,
-      duplicates,
+    updateJob(job, {
+      stage: "Saving rows",
+      percent: 30,
+      processed: 0,
+      total: uniqueRows.length,
     });
+
+    const { inserted, errors } = await insertInChunks(uniqueRows, (done) =>
+      updateJob(job, {
+        processed: done,
+        percent: scale(30, 99, done, uniqueRows.length),
+      }),
+    );
+
+    return updateJob(job, {
+      state: "done",
+      percent: 100,
+      processed: uniqueRows.length,
+      result: {
+        message: "Qualified Excel import completed.",
+        ...summary,
+        importedCount: inserted,
+        failedCount: uniqueRows.length - inserted,
+        duplicateCount: duplicates.length,
+        duplicateCheckPerformed: true,
+        duplicates: duplicates.slice(0, 500), // duplicateCount keeps the real total
+        ...(errors.length && { errors: errors.slice(0, 5) }),
+      },
+    });
+  } catch (err) {
+    return updateJob(job, {
+      state: "failed",
+      error: err.message || "Import failed.",
+    });
+  }
+}
+
+export async function importProspectsExcel(req, res, next) {
+  try {
+    const selectedStatus = String(req.body.status || "").trim();
+
+    if (!ALLOWED_STATUSES.includes(selectedStatus)) {
+      return res.status(400).json({
+        message: "Select Qualified or DisQualified before uploading.",
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ message: "Please upload an Excel file." });
+    }
+
+    const uploader = getUploader(req);
+    if (!uploader.id) {
+      return res
+        .status(401)
+        .json({ message: "Could not identify the uploading user." });
+    }
+    const sentUploadedBy = String(req.body.uploadedBy || "").trim();
+    if (sentUploadedBy && sentUploadedBy !== String(uploader.id)) {
+      return res
+        .status(403)
+        .json({ message: "Uploader does not match the logged-in user." });
+    }
+    const job = {
+      id: randomUUID(),
+      userId: String(uploader.id),
+      state: "running", // running | done | failed
+      stage: "Queued",
+      percent: 0,
+      processed: null,
+      total: null,
+      totalRows: 0,
+      result: null,
+      error: null,
+      updatedAt: Date.now(),
+    };
+
+    importJobs.set(job.id, job);
+    setTimeout(() => importJobs.delete(job.id), JOB_TTL_MS).unref?.();
+
+    res.status(202).json({ jobId: job.id });
+
+    // Not awaited on purpose: the response is already sent.
+    runImportJob(job, { buffer: req.file.buffer, selectedStatus, uploader });
   } catch (error) {
     next(error);
   }
+}
+
+export function getImportStatus(req, res) {
+  const job = importJobs.get(req.params.jobId);
+  const uploader = getUploader(req);
+
+  // Only the user who started the import can see it.
+  if (!job || String(uploader.id) !== job.userId) {
+    return res.status(404).json({
+      message:
+        "Import job not found. It may have expired or the server restarted.",
+    });
+  }
+
+  const { id, userId, ...status } = job;
+  return res.json(status);
 }

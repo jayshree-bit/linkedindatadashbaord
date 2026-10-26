@@ -1,6 +1,7 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import * as api from '../services/dataService';
 import { errMsg } from '../services/apiClient';
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const thunk = (name, fn) =>
   createAsyncThunk(`data/${name}`, async (arg, { rejectWithValue }) => {
@@ -75,12 +76,91 @@ export const deleteRow = thunk(
   }
 );
 
+export const fetchDashboardStats = createAsyncThunk(
+  'dashboard/fetchStats',
+  async (userId = '', { rejectWithValue }) => {
+    try {
+      return await api.getDashboardStatsApi(userId);
+    } catch (error) {
+      return rejectWithValue(errMsg(error));
+    }
+  }
+);
+export const importProspects = createAsyncThunk(
+  'import/prospects',
+  async ({ status, file, uploadedBy }, { dispatch, rejectWithValue }) => {
+    try {
+      // 1) Upload (phase "uploading"), the server answers with a job id.
+      const { jobId } = await api.importProspectsApi(status, file, uploadedBy, (percent) =>
+        dispatch(setImportProgress(percent))
+      );
+
+      dispatch(
+        setImportProcessing({ stage: 'Starting', percent: 0, processed: null, total: null })
+      );
+
+      // 2) Poll the server until the job is done.
+      let failures = 0;
+      for (;;) {
+        await sleep(700);
+
+        let job;
+        try {
+          job = await api.getImportStatusApi(jobId);
+          failures = 0;
+        } catch (error) {
+          // Job gone (404) is final; tolerate a few network blips otherwise.
+          if (error?.response?.status === 404 || ++failures >= 5) throw error;
+          continue;
+        }
+
+        if (job.state === 'failed') return rejectWithValue(job.error || 'Import failed.');
+        if (job.state === 'done') return job.result;
+
+        dispatch(
+          setImportProcessing({
+            stage: job.stage,
+            percent: job.percent,
+            processed: job.processed,
+            total: job.total,
+          })
+        );
+      }
+    } catch (error) {
+      return rejectWithValue(errMsg(error));
+    }
+  }
+);
+
 const initialState = {
   prospect: [],
   company: [],
   pagination: {},
+   global: {
+    total: 0,
+    qualified: 0,
+    disqualified: 0,
+  },
+  users: [],
+  selectedUser: null,
+  stats: {
+    total: 0,
+    qualified: 0,
+    disqualified: 0,
+  },
   loading: false,
   error: null,
+    importState: {
+    loading: false,
+    phase: 'idle',   // 'idle' | 'uploading' | 'processing'
+    progress: 0,     // upload percent
+    stage: '',       // "Reading file" | "Checking duplicates" | "Saving rows"
+    percent: 0,      // import percent (server side)
+    processed: null,
+    total: null,
+    result: null,
+    error: null,
+  },
 };
 
 const slice = createSlice({
@@ -93,6 +173,24 @@ const slice = createSlice({
       state[resource] = (state[resource] ?? []).map((row) =>
         row._id === id ? { ...row, ...changes } : row
       );
+    },
+     setImportProgress: (state, { payload }) => {
+      state.importState.phase = 'uploading';
+      state.importState.progress = payload;
+    },
+
+    setImportProcessing: (state, { payload }) => {
+      state.importState.phase = 'processing';
+      state.importState.stage = payload.stage;
+      state.importState.percent = payload.percent;
+      state.importState.processed = payload.processed;
+      state.importState.total = payload.total;
+    },
+     resetImport: (state) => {
+      state.importState = initialState.importState;
+    },
+    clearDashboardError(state) {
+      state.error = null;
     },
   },
 
@@ -121,7 +219,30 @@ const slice = createSlice({
           row._id === payload.row._id ? payload.row : row
         );
       })
+       .addCase(importProspects.pending, (state) => {
+        state.importState = {
+          ...initialState.importState,
+          loading: true,
+          phase: 'uploading',
+        };
+      })
 
+     .addCase(importProspects.fulfilled, (state, { payload }) => {
+        state.importState = {
+          ...initialState.importState,
+          phase: 'idle',
+          progress: 100,
+          percent: 100,
+          result: payload,
+        };
+      })
+
+     .addCase(importProspects.rejected, (state, { payload, error }) => {
+        state.importState = {
+          ...initialState.importState,
+          error: payload || error?.message || 'Import failed.',
+        };
+      })
       .addCase(deleteRow.fulfilled, (state, { payload }) => {
         state[payload.resource] = (state[payload.resource] ?? []).filter(
           (row) => row._id !== payload.id
@@ -134,7 +255,34 @@ const slice = createSlice({
           pagination.totalPages = Math.ceil(pagination.total / pagination.limit);
         }
       })
+  .addCase(fetchDashboardStats.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(fetchDashboardStats.fulfilled, (state, { payload }) => {
+        state.loading = false;
 
+        // Supports an API response wrapped in { data: {...} }
+        // or a direct dashboard object.
+        const result = payload?.data ?? payload ?? {};
+
+        state.global = {
+          ...initialState.global,
+          ...(result.global ?? {}),
+        };
+
+        state.users = result.users ?? [];
+        state.selectedUser = result.selectedUser ?? null;
+
+        state.stats = {
+          ...initialState.stats,
+          ...(result.stats ?? {}),
+        };
+      })
+      .addCase(fetchDashboardStats.rejected, (state, { payload, error }) => {
+        state.loading = false;
+        state.error = payload || error.message || 'Failed to load dashboard';
+      })
       .addMatcher(
         (action) =>
           action.type.startsWith('data/') && action.type.endsWith('/rejected'),
@@ -143,9 +291,11 @@ const slice = createSlice({
           state.error = action.payload || action.error?.message || 'Request failed';
         }
       );
+
+      
   },
 });
 
-export const { patchLocal } = slice.actions;
+export const { patchLocal,setImportProgress, setImportProcessing, resetImport, clearDashboardError } = slice.actions;
 
 export default slice.reducer;

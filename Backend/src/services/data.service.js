@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Prospect from '../models/Prospect.js';
 import Company from '../models/Company.js';
 
@@ -49,7 +50,8 @@ const isSafeKey = (key) =>
 /* ---------- Column filters ----------
    filters = {
      "Employee Name": { op: "contains", text: "sach", values: null },
-     "Campaign":      { op: "contains", text: "",     values: ["Lead Gen Agent"] }
+     "Campaign":      { op: "contains", text: "",     values: ["Lead Gen Agent"] },
+     "userId":        { op: "equals",   text: "<user ObjectId>" }   // special key, see below
    }
 */
 const textCondition = (op, rawText) => {
@@ -77,6 +79,20 @@ const textCondition = (op, rawText) => {
   }
 };
 
+/* Special filter key `userId` (prospects only): "uploaded by this user".
+   Same rule the dashboard stats use (prospects.uploadedBy = user _id).
+   It must be a real ObjectId here because $match inside aggregate() (the distinct
+   values list) does not cast strings the way find() does.
+   An invalid id matches nothing, so a bad link never shows everyone's rows. */
+const userScopeCondition = (model) => {
+  const id = typeof model === 'string' ? model : model?.text;
+
+  if (!id || !mongoose.isValidObjectId(id)) {
+    return { _id: { $exists: false } };
+  }
+  return { uploadedBy: new mongoose.Types.ObjectId(id) };
+};
+
 const parseFilters = (resource, raw) => {
   if (!raw) return [];
 
@@ -93,6 +109,12 @@ const parseFilters = (resource, raw) => {
   const conditions = [];
 
   for (const [gridKey, model] of Object.entries(parsed)) {
+    // Locked "employee" filter coming from the dashboard link
+    if (resource === 'prospect' && gridKey === 'userId') {
+      conditions.push(userScopeCondition(model));
+      continue;
+    }
+
     const field = resolveField(resource, gridKey);
     if (!isSafeKey(field)) continue;
 

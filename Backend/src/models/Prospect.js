@@ -68,6 +68,13 @@ const prospectSchema = new mongoose.Schema(
     ebbStatus: { type: String, trim: true, default: '' },
     auditorName: { type: String, trim: true, default: '' },
     auditDate: { type: String, trim: true, default: '' },
+      uploadedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
+    importBatchId: { type: String, trim: true, default: '', index: true },
   },
   { timestamps: true }
 );

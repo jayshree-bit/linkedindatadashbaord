@@ -34,6 +34,12 @@ export const updateRowApi = (resource, id, changes) =>
 export const deleteRowApi = (resource, id) =>
   api.delete(`/private/data/${resource}/${id}`).then((response) => response.data);
 
+export const getDashboardStatsApi = (userId = '') =>
+  api
+    .get('/private/dashboard-stats', {
+      params: userId ? { userId } : {},
+    })
+    .then((response) => response.data);
 // Distinct values for the column filter checklist.
 export const getDistinctApi = (
   resource,
@@ -69,3 +75,27 @@ export const exportRowsApi = (
       timeout: 0, // large exports can take a while
     })
     .then((response) => response.data);
+
+
+export const importProspectsApi = (status, file,uploadedBy, onProgress) => {
+  const formData = new FormData();
+  formData.append('status', status);
+    formData.append('uploadedBy', uploadedBy);
+
+  formData.append('file', file);
+
+  return api
+    .post('/private/data/prospect/import-excel', formData, {
+      timeout: 0,
+      onUploadProgress: (e) => {
+        if (onProgress && e.total) onProgress(Math.round((e.loaded * 100) / e.total));
+      },
+    })
+    .then((response) => response.data);
+};
+
+export const getImportStatusApi = (jobId) =>
+  api
+    .get(`/private/data/prospect/import-excel/${encodeURIComponent(jobId)}`)
+    .then((response) => response.data);
+

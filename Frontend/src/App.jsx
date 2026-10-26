@@ -8,9 +8,10 @@ import Layout from './components/layout/Layout';
 
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
-import Prospects from './pages/Prospects';
+import Prospects from './pages/Prospects/Prospects';
 import Companies from './pages/Companies';
 import UserManager from './pages/UserManager';
+import DashboardProspects from './pages/Prospects/Dashboard';
 
 export default function App() {
   const dispatch = useDispatch();
@@ -63,10 +64,19 @@ export default function App() {
 
         {/* Permission-protected pages */}
         <Route
-          path="/prospects"
+          path="/prospects/viewall"
           element={
             <ProtectedRoute resource="prospect">
               <Prospects />
+            </ProtectedRoute>
+          }
+        />
+        
+         <Route
+          path="/prospects/dashbaord"
+          element={
+            <ProtectedRoute resource="prospect">
+              <DashboardProspects />
             </ProtectedRoute>
           }
         />

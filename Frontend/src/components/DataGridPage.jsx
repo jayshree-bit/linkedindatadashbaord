@@ -21,6 +21,7 @@ import {
 import { can } from '../features/authSlice';
 import { getDistinctApi, exportRowsApi } from '../services/dataService';
 import './DataGridPage.css';
+import ImportExcelModal from './ImportExcelModal';
 
 /* ---------- Filter model helpers ---------- */
 
@@ -402,7 +403,14 @@ const renderFor = (key) => {
 
 /* ---------- Page ---------- */
 
-export default function DataGridPage({ resource, title, fields }) {
+const NO_FIXED_FILTERS = {};
+
+export default function DataGridPage({
+  resource,
+  title,
+  fields,
+  fixedFilters = NO_FIXED_FILTERS,
+}) {
   const dispatch = useDispatch();
   const { user } = useSelector((state) => state.auth);
   const dataState = useSelector((state) => state.data);
@@ -429,11 +437,26 @@ export default function DataGridPage({ resource, title, fields }) {
   const [filters, setFilters] = useState({});
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [visibleKeys, setVisibleKeys] = useState(() => fields.map((f) => f.key));
   const [columnOrder, setColumnOrder] = useState(() => fields.map((f) => f.key));
 
   const sortBy = sortColumns[0]?.columnKey ?? '';
   const sortOrder = sortColumns[0]?.direction === 'DESC' ? 'desc' : 'asc';
+
+  // Column filters typed by the user + locked filters from the URL (locked ones win).
+  const fixedKey = JSON.stringify(fixedFilters);
+  const effectiveFilters = useMemo(
+    () => ({ ...filters, ...fixedFilters }),
+    // fixedKey is the stable form of fixedFilters
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filters, fixedKey]
+  );
+
+  // Go back to page 1 when the dashboard link (status / employee) changes.
+  useEffect(() => {
+    setPage(1);
+  }, [fixedKey]);
 
   // Debounced global search
   useEffect(() => {
@@ -464,15 +487,23 @@ export default function DataGridPage({ resource, title, fields }) {
 
   useEffect(() => {
     dispatch(
-      fetchRows({ resource, page, limit, search, sortBy, sortOrder, filters })
+      fetchRows({
+        resource,
+        page,
+        limit,
+        search,
+        sortBy,
+        sortOrder,
+        filters: effectiveFilters,
+      })
     );
-  }, [dispatch, resource, page, limit, search, sortBy, sortOrder, filters]);
+  }, [dispatch, resource, page, limit, search, sortBy, sortOrder, effectiveFilters]);
 
   // Refs keep fetchDistinct stable so the open filter popup does not refetch on every keystroke.
   const searchRef = useRef('');
   const filtersRef = useRef({});
   searchRef.current = search;
-  filtersRef.current = filters;
+  filtersRef.current = effectiveFilters;
 
   const fetchDistinct = useCallback(
     (key, valueSearch) => {
@@ -557,25 +588,22 @@ export default function DataGridPage({ resource, title, fields }) {
       renderCell: ({ rowIdx }) => <span className="text-muted">{offset + rowIdx + 1}</span>,
     };
 
-   
-const dataCols = orderedFields
-  .filter((field) => visibleKeys.includes(field.key))
-  .map((field) => ({
-    key: field.key,
-    name: field.name,
-    minWidth: 180,
-    width: 220,
-    resizable: true,
-    sortable: false,
-    renderHeaderCell: (props) => <HeaderCell {...props} />,
-    renderCell: renderFor(field.key),
-    renderEditCell: canEdit ? textEditor : undefined,
-  }));
+    const dataCols = orderedFields
+      .filter((field) => visibleKeys.includes(field.key))
+      .map((field) => ({
+        key: field.key,
+        name: field.name,
+        minWidth: 180,
+        width: 220,
+        resizable: true,
+        sortable: false,
+        renderHeaderCell: (props) => <HeaderCell {...props} />,
+        renderCell: renderFor(field.key),
+        renderEditCell: canEdit ? textEditor : undefined,
+      }));
 
-
-    const result = [rowNumber, ...dataCols];
-    return result;
-  }, [orderedFields, visibleKeys, canEdit, dispatch, resource, pagination.page, pagination.limit]);
+    return [rowNumber, ...dataCols];
+  }, [orderedFields, visibleKeys, canEdit, pagination.page, pagination.limit]);
 
   const onRowsChange = (newRows, { indexes }) => {
     indexes.forEach((index) => {
@@ -600,7 +628,7 @@ const dataCols = orderedFields
     setExporting(true);
     try {
       // Same search, sort and filters as the grid, and only the visible columns.
-      const columns = orderedFields
+      const exportColumns = orderedFields
         .filter((f) => visibleKeys.includes(f.key))
         .map((f) => ({ key: f.key, name: f.name }));
 
@@ -608,8 +636,8 @@ const dataCols = orderedFields
         search,
         sortBy,
         sortOrder,
-        filters,
-        columns,
+        filters: effectiveFilters,
+        columns: exportColumns,
       });
 
       const url = URL.createObjectURL(blob);
@@ -627,6 +655,22 @@ const dataCols = orderedFields
     }
   };
 
+  const onImported = () => {
+    // Reload the current view (the fetch effect will not re-run if page/filters are unchanged).
+    setPage(1);
+    dispatch(
+      fetchRows({
+        resource,
+        page: 1,
+        limit,
+        search,
+        sortBy,
+        sortOrder,
+        filters: effectiveFilters,
+      })
+    );
+  };
+
   const addBlank = () => {
     dispatch(addRow({ resource, row: Object.fromEntries(fields.map((f) => [f.key, ''])) }));
   };
@@ -636,6 +680,7 @@ const dataCols = orderedFields
       current.includes(key) ? current.filter((k) => k !== key) : [...current, key]
     );
 
+  // Clears only the user's own filters; the locked URL filters stay.
   const clearAll = () => {
     setFilterModels({});
     setSearchInput('');
@@ -655,7 +700,23 @@ const dataCols = orderedFields
           <h2 className="dgp-title">{title}</h2>
           <span className="dgp-badge">{pagination.total.toLocaleString()} total records</span>
         </div>
-       
+
+        {resource === 'prospect' && canEdit && (
+          <button
+            type="button"
+            className="dgp-btn dgp-btn-primary"
+            onClick={() => setShowImport(true)}
+          >
+            Import Excel
+          </button>
+        )}
+
+        {showImport && (
+          <ImportExcelModal
+            onClose={() => setShowImport(false)}
+            onImported={onImported}
+          />
+        )}
       </div>
 
       <div className="dgp-card">
