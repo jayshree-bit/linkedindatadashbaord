@@ -21,6 +21,7 @@ export default function DashboardProspects() {
   }, [dispatch]);
 
   const handleUserChange = (userId) => {
+    if (loading) return; // ignore clicks while a request is running
     dispatch(fetchDashboardStats(userId || ''));
   };
 
@@ -100,6 +101,9 @@ export default function DashboardProspects() {
 
   return (
     <div className="min-h-full space-y-6 bg-gray-50 p-4 text-gray-900 dark:bg-gray-950 dark:text-gray-100 sm:p-6">
+      {/* Loader overlay: shown on first load, user click and Refresh */}
+      {loading && <PageLoader />}
+
       {/* Page heading */}
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>
@@ -118,8 +122,12 @@ export default function DashboardProspects() {
           disabled={loading}
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium shadow-sm transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700"
         >
-          <span aria-hidden="true">↻</span>
-          Refresh
+          {loading ? (
+            <Spinner className="h-4 w-4" />
+          ) : (
+            <span aria-hidden="true">↻</span>
+          )}
+          {loading ? 'Refreshing...' : 'Refresh'}
         </button>
       </div>
 
@@ -146,12 +154,6 @@ export default function DashboardProspects() {
       <section aria-label="Overall prospect statistics">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Overall Statistics</h2>
-
-          {loading && (
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              Updating...
-            </span>
-          )}
         </div>
 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
@@ -373,6 +375,46 @@ export default function DashboardProspects() {
             </div>
           )}
         </section>
+      </div>
+    </div>
+  );
+}
+
+function Spinner({ className = 'h-5 w-5' }) {
+  return (
+    <svg
+      className={`animate-spin ${className}`}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+      />
+    </svg>
+  );
+}
+
+function PageLoader() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-white/60 backdrop-blur-[2px] dark:bg-gray-950/60"
+    >
+      <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-3 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+        <Spinner className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+        <span className="text-sm font-medium">Loading...</span>
       </div>
     </div>
   );

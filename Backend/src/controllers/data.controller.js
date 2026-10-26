@@ -67,11 +67,16 @@ const PROSPECT_COLUMN_MAP = {
   "audit date": "auditDate",
 };
 
+
+
+
+const EMPTY_STATS = { total: 0, qualified: 0, disqualified: 0 };
+const LIST_LIMIT = 200;
+
 export const getProspectDashboardStats = async (req, res, next) => {
   try {
-    const { userId } = req.query;
+    const { userId, includeLists } = req.query;
 
-    // Validate selected user ID
     if (userId && !mongoose.isValidObjectId(userId)) {
       return res.status(400).json({
         success: false,
@@ -79,103 +84,59 @@ export const getProspectDashboardStats = async (req, res, next) => {
       });
     }
 
-    // Global prospect counts
-    const globalCountsPromise = Prospect.aggregate([
-      {
-        $group: {
-          _id: null,
-          total: { $sum: 1 },
-          qualified: {
-            $sum: {
-              $cond: [{ $eq: ['$status', 'Qualified'] }, 1, 0],
-            },
-          },
-          disqualified: {
-            $sum: {
-              $cond: [{ $eq: ['$status', 'DisQualified'] }, 1, 0],
-            },
-          },
-        },
-      },
-    ]);
-
-    // Users for the sidebar
-    const usersPromise = User.find()
-      .select('_id name email')
-      .sort({ name: 1 })
-      .lean();
-
-    // Counts grouped by uploadedBy
-    const userCountsPromise = Prospect.aggregate([
-      {
-        $match: {
-          uploadedBy: { $ne: null },
-        },
-      },
-      {
-        $group: {
-          _id: '$uploadedBy',
-          total: { $sum: 1 },
-          qualified: {
-            $sum: {
-              $cond: [{ $eq: ['$status', 'Qualified'] }, 1, 0],
-            },
-          },
-          disqualified: {
-            $sum: {
-              $cond: [{ $eq: ['$status', 'DisQualified'] }, 1, 0],
-            },
-          },
-        },
-      },
-    ]);
-
-    const [globalCounts, users, userCounts] = await Promise.all([
-      globalCountsPromise,
-      usersPromise,
-      userCountsPromise,
-    ]);
-
-    const global = globalCounts[0] || {
-      total: 0,
-      qualified: 0,
-      disqualified: 0,
-    };
-
-    const countsByUser = new Map(
-      userCounts.map((item) => [
-        item._id.toString(),
+    // ONE aggregation instead of two: group by uploadedBy (null included).
+    // Global totals are derived from these rows in JS, so Prospect is scanned once.
+    const [countRows, users] = await Promise.all([
+      Prospect.aggregate([
         {
-          total: item.total,
-          qualified: item.qualified,
-          disqualified: item.disqualified,
+          $group: {
+            _id: '$uploadedBy',
+            total: { $sum: 1 },
+            qualified: {
+              $sum: { $cond: [{ $eq: ['$status', 'Qualified'] }, 1, 0] },
+            },
+            disqualified: {
+              $sum: { $cond: [{ $eq: ['$status', 'DisQualified'] }, 1, 0] },
+            },
+          },
         },
-      ])
-    );
+      ]),
+      User.find().select('_id name email').sort({ name: 1 }).lean(),
+    ]);
+
+    const global = { ...EMPTY_STATS };
+    const countsByUser = new Map();
+
+    for (const row of countRows) {
+      global.total += row.total;
+      global.qualified += row.qualified;
+      global.disqualified += row.disqualified;
+
+      // Rows without uploadedBy count toward global only
+      if (row._id) {
+        countsByUser.set(row._id.toString(), {
+          total: row.total,
+          qualified: row.qualified,
+          disqualified: row.disqualified,
+        });
+      }
+    }
 
     const userList = users.map((user) => ({
       _id: user._id,
       name: user.name || user.email || 'Unnamed user',
       email: user.email || '',
-      stats: countsByUser.get(user._id.toString()) || {
-        total: 0,
-        qualified: 0,
-        disqualified: 0,
-      },
+      stats: countsByUser.get(user._id.toString()) || { ...EMPTY_STATS },
     }));
 
-    let selectedStats = global;
     let selectedUser = null;
-
-    // Empty lists when no user is selected
+    let selectedStats = global;
     let qualifiedList = [];
     let disqualifiedList = [];
 
     if (userId) {
       selectedUser =
-        userList.find(
-          (user) => user._id.toString() === userId
-        ) || null;
+        userList.find((user) => user._id.toString() === userId) || null;
 
       if (!selectedUser) {
         return res.status(404).json({
@@ -186,36 +147,26 @@ export const getProspectDashboardStats = async (req, res, next) => {
 
       selectedStats = selectedUser.stats;
 
-      // Fetch only this user's qualified and disqualified prospects
-      const [qualifiedRecords, disqualifiedRecords] =
-        await Promise.all([
-          Prospect.find({
-            uploadedBy: userId,
-            status: 'Qualified',
-          })
+      // The dashboard UI only needs counts. Fetch the lists only when asked
+      // (?includeLists=true), capped and without heavy fields.
+      if (includeLists === 'true') {
+        const listQuery = (status) =>
+          Prospect.find({ uploadedBy: userId, status })
             .sort({ createdAt: -1 })
-            .lean(),
+            .limit(LIST_LIMIT)
+            .lean();
 
-          Prospect.find({
-            uploadedBy: userId,
-            status: 'DisQualified',
-          })
-            .sort({ createdAt: -1 })
-            .lean(),
+        [qualifiedList, disqualifiedList] = await Promise.all([
+          listQuery('Qualified'),
+          listQuery('DisQualified'),
         ]);
-
-      qualifiedList = qualifiedRecords;
-      disqualifiedList = disqualifiedRecords;
+      }
     }
 
     return res.status(200).json({
       success: true,
       data: {
-        global: {
-          total: global.total,
-          qualified: global.qualified,
-          disqualified: global.disqualified,
-        },
+        global,
         selectedUser,
         stats: selectedStats,
         users: userList,
