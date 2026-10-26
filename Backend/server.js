@@ -15,12 +15,24 @@ import notificationRoutes from './src/routes/notification.routes.js';
 const app = express();
 const server = createServer(app);
 
-const clientUrl = process.env.CLIENT_URL || 'https://prospectdash.netlify.app';
+
+
+const allowedOrigins = [
+  process.env.CLIENT_URL || 'https://prospectdash.netlify.app',
+  'http://localhost:5173', // Vite dev, remove if unused
+].map((url) => url.replace(/\/+$/, ''));
+
+app.set('trust proxy', 1);
 
 app.use(cors({
-  origin: clientUrl,
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error(`CORS blocked: ${origin}`));
+  },
   credentials: true,
 }));
+
+
 
 const io = new Server(server, {
   cors: {
@@ -45,8 +57,8 @@ app.use(cookieParser());
 
 app.use('/api/public', publicRoutes);
 app.use('/api/auth', authRoutes);
-app.use('/api/private', privateRoutes);
 app.use('/api/private/notifications', notificationRoutes);
+app.use('/api/private', privateRoutes);
 
 app.use((req, res) =>
   res.status(404).json({ message: 'Route not found' })
