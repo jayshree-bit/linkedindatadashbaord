@@ -27,7 +27,7 @@ export default function CompanyImportModal({ open, onClose, onDone }) {
   const dispatch = useDispatch();
   const fileRef = useRef(null);
   const [file, setFile] = useState(null);
-
+const TEMPLATE_URL = '/templates/company_import_template.xlsx';
   const { user } = useSelector((state) => state.auth);
   const { loading, phase, progress, stage, percent, processed, total, result, error } =
     useSelector((state) => state.data.importState);
@@ -73,7 +73,18 @@ export default function CompanyImportModal({ open, onClose, onDone }) {
             ×
           </button>
         </div>
-
+  <div className="flex items-center justify-between rounded-lg border border-dashed border-indigo-200 bg-indigo-50/50 px-3 py-2">
+            <span className="text-xs text-slate-600">
+                Not sure about the format? Use our sample sheet.
+            </span>
+            <a
+                href={TEMPLATE_URL}
+                download="company_import_template.xlsx"
+                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+            >
+                ⬇ Download template
+            </a>
+            </div>
         <div className="mt-5 flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm dark:bg-slate-800">
           <span className="text-slate-500 dark:text-slate-400">Uploaded by</span>
           <span className="font-semibold text-slate-800 dark:text-slate-100">{uploaderName}</span>
