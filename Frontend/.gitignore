@@ -4,9 +4,9 @@ node_modules/
 .pnp.js
 
 # Production / Build outputs
-dist/
-build/
-out/
+/dist/
+/build/
+/out/
 .next/
 
 # Testing
