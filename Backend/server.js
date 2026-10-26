@@ -15,6 +15,7 @@ import notificationRoutes from './src/routes/notification.routes.js';
 const app = express();
 const server = createServer(app);
 
+const clientUrl = process.env.CLIENT_URL || 'https://prospectdash.netlify.app';
 
 
 const allowedOrigins = [
@@ -59,7 +60,6 @@ app.use('/api/public', publicRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/private/notifications', notificationRoutes);
 app.use('/api/private', privateRoutes);
-
 app.use((req, res) =>
   res.status(404).json({ message: 'Route not found' })
 );
