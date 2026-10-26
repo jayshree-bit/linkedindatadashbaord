@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs';
 import { randomUUID } from 'crypto';
 import Company from '../models/Company.js';
-
+import { emitImportCompleted } from '../utils/importNotifications.js';
 /* Excel header (lowercase) -> Company schema field.
    Headers not listed here are kept in additionalData, so nothing is lost. */
 const COLUMN_MAP = {
@@ -185,8 +185,7 @@ const insertInChunks = async (docs, onChunk) => {
   }
   return { inserted, errors };
 };
-
-async function runImportJob(job, { buffer, uploader }) {
+async function runImportJob(job, { buffer, uploader, io }) {
   try {
     updateJob(job, { stage: 'Reading file', percent: 3 });
 
@@ -267,24 +266,36 @@ async function runImportJob(job, { buffer, uploader }) {
       })
     );
 
-    return updateJob(job, {
-      state: 'done',
-      percent: 100,
-      processed: uniqueRows.length,
-      result: {
-        message: 'Company Excel import completed.',
-        importBatchId,
-        uploadedBy: uploader.id,
-        uploadedByName: uploader.name,
-        totalRows: parsed.length,
-        importedCount: inserted,
-        failedCount: uniqueRows.length - inserted,
-        invalidCount: invalid.length, // rows without a company name
-        duplicateCount: duplicates.length,
-        duplicates: duplicates.slice(0, 500),
-        ...(errors.length && { errors: errors.slice(0, 5) }),
-      },
-    });
+updateJob(job, {
+  state: 'done',
+  percent: 100,
+  processed: uniqueRows.length,
+  result: {
+    message: 'Company Excel import completed.',
+    importBatchId,
+    uploadedBy: uploader.id,
+    uploadedByName: uploader.name,
+    totalRows: parsed.length,
+    importedCount: inserted,
+    failedCount: uniqueRows.length - inserted,
+    invalidCount: invalid.length,
+    duplicateCount: duplicates.length,
+    duplicates: duplicates.slice(0, 500),
+    ...(errors.length && { errors: errors.slice(0, 5) }),
+  },
+});
+
+await emitImportCompleted(io, {
+  type: 'company',
+  uploaderName: uploader.name || 'Unknown user',
+  totalImported: inserted,
+  companyCount: inserted,
+  status: 'success',
+  message: `${uploader.name || 'A user'} imported ${inserted} companies`,
+});
+
+return job;
+
   } catch (err) {
     return updateJob(job, { state: 'failed', error: err.message || 'Import failed.' });
   }
@@ -326,7 +337,13 @@ export async function importCompaniesExcel(req, res, next) {
     res.status(202).json({ jobId: job.id });
 
     // Not awaited on purpose: the response is already sent.
-    runImportJob(job, { buffer: req.file.buffer, uploader });
+const io = req.app.get('io');
+
+runImportJob(job, {
+  buffer: req.file.buffer,
+  uploader,
+  io,
+});
   } catch (error) {
     next(error);
   }

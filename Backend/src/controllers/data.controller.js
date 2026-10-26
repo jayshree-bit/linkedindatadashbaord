@@ -5,6 +5,7 @@ import { randomUUID } from "crypto";
 import User from '../models/User.js';
 import mongoose from 'mongoose';
 
+import { emitImportCompleted } from '../utils/importNotifications.js';
 /* ====================================================================
    Excel header -> Prospect schema field
    ==================================================================== */
@@ -539,7 +540,10 @@ const getUploader = (req) => {
   };
 };
 
-async function runImportJob(job, { buffer, selectedStatus, uploader }) {
+async function runImportJob(
+  job,
+  { buffer, selectedStatus, uploader, io }
+) {
   try {
     updateJob(job, {
       stage: "Reading file",
@@ -595,19 +599,31 @@ async function runImportJob(job, { buffer, selectedStatus, uploader }) {
         }),
       );
 
-      return updateJob(job, {
-        state: "done",
-        percent: 100,
-        processed: rows.length,
-        result: {
-          message: "DisQualified Excel import completed.",
-          ...summary,
-          importedCount: inserted,
-          failedCount: rows.length - inserted,
-          duplicateCheckPerformed: false,
-          ...(errors.length && { errors: errors.slice(0, 5) }),
-        },
-      });
+      updateJob(job, {
+  state: 'done',
+  percent: 100,
+  processed: rows.length,
+  result: {
+    message: 'DisQualified Excel import completed.',
+    ...summary,
+    importedCount: inserted,
+    failedCount: rows.length - inserted,
+    duplicateCheckPerformed: false,
+    ...(errors.length && { errors: errors.slice(0, 5) }),
+  },
+});
+
+await emitImportCompleted(io, {
+  type: 'prospect',
+  uploaderName: uploader.name || 'Unknown user',
+  totalImported: inserted,
+  qualifiedCount: 0,
+  disqualifiedCount: inserted,
+  status: 'success',
+  message: `${uploader.name || 'A user'} imported ${inserted} DisQualified prospects`,
+});
+
+return job;
     }
 
     /* ---------- Qualified: skip duplicates ---------- */
@@ -678,21 +694,33 @@ async function runImportJob(job, { buffer, selectedStatus, uploader }) {
       }),
     );
 
-    return updateJob(job, {
-      state: "done",
-      percent: 100,
-      processed: uniqueRows.length,
-      result: {
-        message: "Qualified Excel import completed.",
-        ...summary,
-        importedCount: inserted,
-        failedCount: uniqueRows.length - inserted,
-        duplicateCount: duplicates.length,
-        duplicateCheckPerformed: true,
-        duplicates: duplicates.slice(0, 500), // duplicateCount keeps the real total
-        ...(errors.length && { errors: errors.slice(0, 5) }),
-      },
-    });
+   updateJob(job, {
+  state: 'done',
+  percent: 100,
+  processed: uniqueRows.length,
+  result: {
+    message: 'Qualified Excel import completed.',
+    ...summary,
+    importedCount: inserted,
+    failedCount: uniqueRows.length - inserted,
+    duplicateCount: duplicates.length,
+    duplicateCheckPerformed: true,
+    duplicates: duplicates.slice(0, 500),
+    ...(errors.length && { errors: errors.slice(0, 5) }),
+  },
+});
+
+await emitImportCompleted(io, {
+  type: 'prospect',
+  uploaderName: uploader.name || 'Unknown user',
+  totalImported: inserted,
+  qualifiedCount: inserted,
+  disqualifiedCount: 0,
+  status: 'success',
+  message: `${uploader.name || 'A user'} imported ${inserted} Qualified prospects`,
+});
+
+return job;
   } catch (err) {
     return updateJob(job, {
       state: "failed",
@@ -747,7 +775,14 @@ export async function importProspectsExcel(req, res, next) {
     res.status(202).json({ jobId: job.id });
 
     // Not awaited on purpose: the response is already sent.
-    runImportJob(job, { buffer: req.file.buffer, selectedStatus, uploader });
+  const io = req.app.get('io');
+
+runImportJob(job, {
+  buffer: req.file.buffer,
+  selectedStatus,
+  uploader,
+  io,
+});
   } catch (error) {
     next(error);
   }
