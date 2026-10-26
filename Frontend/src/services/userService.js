@@ -9,4 +9,5 @@ export const deleteUserApi = (id) =>
   api.delete(`/private/users/${id}`).then((r) => r.data);
 export const updateRoleApi = (id, permissions) =>
   api.put(`/private/roles/${id}`, { permissions }).then((r) => r.data);
-
+export const changePasswordApi = (body) =>
+  api.put("/auth/change-password", body).then((r) => r.data);

@@ -99,3 +99,35 @@ export const getImportStatusApi = (jobId) =>
     .get(`/private/data/prospect/import-excel/${encodeURIComponent(jobId)}`)
     .then((response) => response.data);
 
+// Dashboard overview (date range). from / to are "YYYY-MM-DD".
+export const getDashboardApi = ({ from = '', to = '', limit = 10 } = {}) =>
+  api
+    .get('/private/dashboard', {
+      params: {
+        ...(from && { from }),
+        ...(to && { to }),
+        limit,
+      },
+    })
+    .then((response) => response.data);
+
+
+export const importCompaniesApi = (file, uploadedBy, onProgress) => {
+  const formData = new FormData();
+  formData.append('uploadedBy', uploadedBy);
+  formData.append('file', file);
+
+  return api
+    .post('/private/data/company/import-excel', formData, {
+      timeout: 0,
+      onUploadProgress: (e) => {
+        if (onProgress && e.total) onProgress(Math.round((e.loaded * 100) / e.total));
+      },
+    })
+    .then((response) => response.data);
+};
+
+export const getCompanyImportStatusApi = (jobId) =>
+  api
+    .get(`/private/data/company/import-excel/${encodeURIComponent(jobId)}`)
+    .then((response) => response.data);

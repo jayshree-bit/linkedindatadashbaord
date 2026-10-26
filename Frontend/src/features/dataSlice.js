@@ -1,4 +1,4 @@
-import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { createSlice, createAsyncThunk, isAnyOf } from '@reduxjs/toolkit';
 import * as api from '../services/dataService';
 import { errMsg } from '../services/apiClient';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -132,10 +132,63 @@ export const importProspects = createAsyncThunk(
   }
 );
 
+export const fetchDashboard = createAsyncThunk(
+  'dashboard/fetchOverview',
+  async ({ from = '', to = '', limit = 10 } = {}, { rejectWithValue }) => {
+    try {
+      const res = await api.getDashboardApi({ from, to, limit });
+      return res?.data ?? res; // API returns { success, data }
+    } catch (error) {
+      return rejectWithValue(errMsg(error));
+    }
+  }
+);
+
+export const importCompanies = createAsyncThunk(
+  'import/companies',
+  async ({ file, uploadedBy }, { dispatch, rejectWithValue }) => {
+    try {
+      const { jobId } = await api.importCompaniesApi(file, uploadedBy, (percent) =>
+        dispatch(setImportProgress(percent))
+      );
+
+      dispatch(setImportProcessing({ stage: 'Starting', percent: 0, processed: null, total: null }));
+
+      let failures = 0;
+      for (;;) {
+        await sleep(700);
+
+        let job;
+        try {
+          job = await api.getCompanyImportStatusApi(jobId);
+          failures = 0;
+        } catch (error) {
+          if (error?.response?.status === 404 || ++failures >= 5) throw error;
+          continue;
+        }
+
+        if (job.state === 'failed') return rejectWithValue(job.error || 'Import failed.');
+        if (job.state === 'done') return job.result;
+
+        dispatch(
+          setImportProcessing({
+            stage: job.stage,
+            percent: job.percent,
+            processed: job.processed,
+            total: job.total,
+          })
+        );
+      }
+    } catch (error) {
+      return rejectWithValue(errMsg(error));
+    }
+  }
+);
 const initialState = {
   prospect: [],
   company: [],
   pagination: {},
+  dashboard: { data: null, loading: false, error: null },
    global: {
     total: 0,
     qualified: 0,
@@ -282,6 +335,39 @@ const slice = createSlice({
       .addCase(fetchDashboardStats.rejected, (state, { payload, error }) => {
         state.loading = false;
         state.error = payload || error.message || 'Failed to load dashboard';
+      })
+      .addCase(fetchDashboard.pending, (state) => {
+        state.dashboard.loading = true;
+        state.dashboard.error = null;
+      })
+      .addCase(fetchDashboard.fulfilled, (state, { payload }) => {
+        state.dashboard.loading = false;
+        state.dashboard.data = payload;
+      })
+      .addCase(fetchDashboard.rejected, (state, action) => {
+        if (action.meta?.aborted) return; // a newer date range replaced this request
+        state.dashboard.loading = false;
+        state.dashboard.error =
+          action.payload || action.error?.message || 'Failed to load dashboard';
+      })
+
+      .addMatcher(isAnyOf(importProspects.pending, importCompanies.pending), (state) => {
+        state.importState = { ...initialState.importState, loading: true, phase: 'uploading' };
+      })
+      .addMatcher(isAnyOf(importProspects.fulfilled, importCompanies.fulfilled), (state, { payload }) => {
+        state.importState = {
+          ...initialState.importState,
+          phase: 'idle',
+          progress: 100,
+          percent: 100,
+          result: payload,
+        };
+      })
+      .addMatcher(isAnyOf(importProspects.rejected, importCompanies.rejected), (state, { payload, error }) => {
+        state.importState = {
+          ...initialState.importState,
+          error: payload || error?.message || 'Import failed.',
+        };
       })
       .addMatcher(
         (action) =>

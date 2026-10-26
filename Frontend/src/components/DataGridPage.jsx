@@ -22,7 +22,7 @@ import { can } from '../features/authSlice';
 import { getDistinctApi, exportRowsApi } from '../services/dataService';
 import './DataGridPage.css';
 import ImportExcelModal from './ImportExcelModal';
-
+import CompanyImportModal from './CompanyImportModal';
 /* ---------- Filter model helpers ---------- */
 
 const OPERATORS = [
@@ -440,6 +440,7 @@ export default function DataGridPage({
   const [showImport, setShowImport] = useState(false);
   const [visibleKeys, setVisibleKeys] = useState(() => fields.map((f) => f.key));
   const [columnOrder, setColumnOrder] = useState(() => fields.map((f) => f.key));
+const [importOpen, setImportOpen] = useState(false);
 
   const sortBy = sortColumns[0]?.columnKey ?? '';
   const sortOrder = sortColumns[0]?.direction === 'DESC' ? 'desc' : 'asc';
@@ -709,6 +710,13 @@ export default function DataGridPage({
           >
             Import Excel
           </button>
+          
+        )}
+      {resource === 'company' && canEdit && (
+        <button onClick={() => setImportOpen(true)} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">
+  Import Excel
+</button>
+          
         )}
 
         {showImport && (
@@ -719,6 +727,11 @@ export default function DataGridPage({
         )}
       </div>
 
+<CompanyImportModal
+  open={importOpen}
+  onClose={() => setImportOpen(false)}
+  onDone={() => dispatch(fetchRows({ resource: 'company', page: 1, limit: 10 }))}
+/>
       <div className="dgp-card">
         <div className="dgp-toolbar">
           <div className="dgp-search">

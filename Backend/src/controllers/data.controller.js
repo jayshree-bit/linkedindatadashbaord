@@ -4,6 +4,7 @@ import Prospect from "../models/Prospect.js";
 import { randomUUID } from "crypto";
 import User from '../models/User.js';
 import mongoose from 'mongoose';
+
 /* ====================================================================
    Excel header -> Prospect schema field
    ==================================================================== */
@@ -225,7 +226,15 @@ export const getProspectDashboardStats = async (req, res, next) => {
     next(error);
   }
 };
-
+export const getDashboard = async (req, res, next) => {
+  try {
+    console.log(" function call")
+    const data = await svc.getDashboard(req.query);
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
 /* ====================================================================
    Generic CRUD handlers
    ==================================================================== */

@@ -26,7 +26,7 @@ export default function Header({ user, onMenuClick }) {
 
   const [loggingOut, setLoggingOut] = useState(false);
   const [theme, setTheme] = useState(getInitialTheme);
-
+  const [profileOpen, setProfileOpen] = useState(false);
   // Apply the theme globally to the document.
   useEffect(() => {
     document.documentElement.classList.toggle(
@@ -71,6 +71,12 @@ export default function Header({ user, onMenuClick }) {
   const isDark = theme === 'dark';
 
   return (
+    <>
+
+
+
+
+   
     <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 text-slate-900 backdrop-blur-xl transition-colors duration-300 dark:border-slate-700 dark:bg-slate-900/90 dark:text-slate-100">
       <div className="flex h-20 items-center justify-between gap-3 px-4 sm:gap-4 sm:px-6 lg:px-8">
         {/* Workspace title and mobile navigation */}
@@ -148,14 +154,26 @@ export default function Header({ user, onMenuClick }) {
               {initials}
             </div>
 
-            <div className="hidden max-w-32 sm:block">
-              <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
-                {user?.name || user?.username || 'User'}
-              </p>
-              <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-                {user?.role?.name || 'Member'}
-              </p>
-            </div>
+          
+{/* Clickable user profile */}
+<button
+  type="button"
+  onClick={() => setProfileOpen(true)}
+  aria-label="Open user profile"
+  className="flex items-center gap-2 rounded-xl p-1.5 text-left transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:hover:bg-slate-800"
+>
+ 
+
+  <div className="hidden max-w-32 sm:block">
+    <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
+      {user?.name || user?.username || "User"}
+    </p>
+    <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+      {user?.role?.name || "Member"}
+    </p>
+  </div>
+</button>
+
           </div>
 
           {/* Logout */}
@@ -173,5 +191,127 @@ export default function Header({ user, onMenuClick }) {
         </div>
       </div>
     </header>
+
+    {profileOpen && (
+  <div
+    className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+    onClick={() => setProfileOpen(false)}
+  >
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="profile-modal-title"
+      className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* Modal header */}
+      <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-5 dark:border-slate-700 dark:bg-slate-800">
+        <div>
+          <h2
+            id="profile-modal-title"
+            className="text-lg font-bold text-slate-900 dark:text-white"
+          >
+            My Profile
+          </h2>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            View your account information
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setProfileOpen(false)}
+          aria-label="Close profile"
+          className="rounded-lg p-2 text-xl text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700"
+        >
+          &times;
+        </button>
+      </div>
+
+      {/* Profile details */}
+      <div className="p-6">
+        <div className="mb-6 flex items-center gap-4">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-xl font-bold text-white">
+            {initials}
+          </div>
+
+          <div className="min-w-0">
+            <h3 className="truncate text-lg font-bold text-slate-900 dark:text-white">
+              {user?.name || user?.username || "User"}
+            </h3>
+            <p className="truncate text-sm text-slate-500 dark:text-slate-400">
+              {user?.role?.name || "Member"}
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {[
+            ["Full Name", user?.name],
+            ["Username", user?.username],
+            ["Email Address", user?.email],
+            ["Phone Number", user?.phone],
+            ["Role", user?.role?.name],
+          ].map(([label, value]) => (
+            <div
+              key={label}
+              className="grid grid-cols-[120px_minmax(0,1fr)] gap-3 border-b border-slate-100 pb-3 last:border-0 dark:border-slate-800"
+            >
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                {label}
+              </p>
+              <p className="break-words text-right text-sm font-medium text-slate-800 dark:text-slate-100">
+                {value || "Not provided"}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        {/* Role permissions */}
+        <div className="mt-5 rounded-xl bg-slate-50 p-4 dark:bg-slate-800">
+          <h4 className="mb-3 text-sm font-semibold text-slate-800 dark:text-white">
+            My Permissions
+          </h4>
+
+          <div className="space-y-3">
+            {["prospect", "company", "user"].map((resource) => (
+              <div
+                key={resource}
+                className="flex items-center justify-between gap-3"
+              >
+                <span className="text-sm capitalize text-slate-600 dark:text-slate-300">
+                  {resource}
+                </span>
+
+                <div className="flex gap-2">
+                  {["view", "edit"].map((action) => {
+                    const allowed =
+                      user?.role?.permissions?.[resource]?.[action] === true;
+
+                    return (
+                      <span
+                        key={action}
+                        className={`rounded-md px-2 py-1 text-xs font-medium ${
+                          allowed
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                            : "bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400"
+                        }`}
+                      >
+                        {action}: {allowed ? "Yes" : "No"}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+       
+      </div>
+    </div>
+  </div>
+)}
+    </>
   );
 }

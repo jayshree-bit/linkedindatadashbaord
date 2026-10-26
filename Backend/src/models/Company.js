@@ -39,11 +39,28 @@ const companySchema = new mongoose.Schema(
     additionalData: {
       type: mongoose.Schema.Types.Mixed,
       default: {}
-    }
+    },
+        // Contact + import tracking
+    emailAddress: { type: String, trim: true, lowercase: true, index: true },
+    nameKey: { type: String, index: true }, // trimmed + lowercased name, used for duplicate checks
+    uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
+    uploadedByName: { type: String, trim: true },
+    importBatchId: { type: String, index: true },
   },
   {
     timestamps: true
   }
 );
+const makeKey = (v) => String(v || '').trim().toLowerCase();
 
+companySchema.pre('validate', function (next) {
+  if (this.name) this.nameKey = makeKey(this.name);
+  next();
+});
+
+companySchema.pre('findOneAndUpdate', function (next) {
+  const set = this.getUpdate()?.$set;
+  if (set?.name !== undefined) set.nameKey = makeKey(set.name);
+  next();
+});
 export default mongoose.model('Company', companySchema);

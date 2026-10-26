@@ -1,32 +1,34 @@
-import { useEffect, useState } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
+import { useEffect, useState } from "react";
+import { useDispatch, useSelector } from "react-redux";
 import {
   fetchUsers,
   fetchRoles,
   addUser,
+  editUser,
   changeUserRole,
+  changePassword,
   removeUser,
   saveRolePermissions,
   clearError,
-} from '../features/usersSlice';
-import { can } from '../features/authSlice';
+} from "../features/usersSlice";
+import { can } from "../features/authSlice";
 
-const RESOURCES = ['prospect', 'company', 'user'];
+const RESOURCES = ["prospect", "company", "user"];
 
 const inputClass =
-  'w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-indigo-500/20';
+  "w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-indigo-500/20";
 
 const selectClass =
-  'w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 disabled:cursor-not-allowed disabled:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:ring-indigo-500/20 dark:disabled:bg-slate-800/50';
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 disabled:cursor-not-allowed disabled:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:ring-indigo-500/20 dark:disabled:bg-slate-800/50";
 
 const buttonClass =
-  'inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-60';
+  "inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-60";
 
 const cardClass =
-  'overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-900';
+  "overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-900";
 
 const labelClass =
-  'mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-200';
+  "mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-200";
 
 function SectionHeading({ eyebrow, title, description, count }) {
   return (
@@ -39,7 +41,9 @@ function SectionHeading({ eyebrow, title, description, count }) {
           {title}
         </h2>
         {description && (
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{description}</p>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            {description}
+          </p>
         )}
       </div>
 
@@ -52,24 +56,250 @@ function SectionHeading({ eyebrow, title, description, count }) {
   );
 }
 
+function EditUserModal({ user, roles, onClose }) {
+  const dispatch = useDispatch();
+  const [form, setForm] = useState({
+    name: user.name || "",
+    username: user.username || "",
+    phone: user.phone || "",
+    roleId: user.role?._id || "",
+    password: "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    const body = { ...form };
+    if (!body.password) delete body.password; // blank = keep current password
+    const res = await dispatch(editUser({ id: user._id, body }));
+    setSaving(false);
+    if (!res.error) onClose();
+  };
+
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <form
+        onSubmit={submit}
+        className={`${cardClass} w-full max-w-lg space-y-4 p-6`}
+      >
+        <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+          Edit {user.email}
+        </h3>
+
+        <div>
+          <label htmlFor="edit-name" className={labelClass}>
+            Full name
+          </label>
+          <input
+            id="edit-name"
+            className={inputClass}
+            value={form.name}
+            onChange={set("name")}
+          />
+        </div>
+
+        <div>
+          <label htmlFor="edit-username" className={labelClass}>
+            Username
+          </label>
+          <input
+            id="edit-username"
+            className={inputClass}
+            value={form.username}
+            onChange={set("username")}
+          />
+        </div>
+
+        <div>
+          <label htmlFor="edit-phone" className={labelClass}>
+            Phone
+          </label>
+          <input
+            id="edit-phone"
+            className={inputClass}
+            type="tel"
+            value={form.phone}
+            onChange={set("phone")}
+          />
+        </div>
+
+        <div>
+          <label htmlFor="edit-role" className={labelClass}>
+            Role
+          </label>
+          <select
+            id="edit-role"
+            className={selectClass}
+            value={form.roleId}
+            onChange={set("roleId")}
+          >
+            {roles.map((r) => (
+              <option key={r._id} value={r._id}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label htmlFor="edit-password" className={labelClass}>
+            New password (optional)
+          </label>
+          <input
+            id="edit-password"
+            className={inputClass}
+            type="password"
+            minLength={8}
+            autoComplete="new-password"
+            placeholder="Leave blank to keep current"
+            value={form.password}
+            onChange={set("password")}
+          />
+        </div>
+
+        <div className="flex justify-end gap-3 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            Cancel
+          </button>
+          <button type="submit" disabled={saving} className={buttonClass}>
+            {saving ? "Saving..." : "Save changes"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ChangePasswordCard() {
+  const dispatch = useDispatch();
+  const [f, setF] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirm: "",
+  });
+  const [msg, setMsg] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setMsg("");
+    if (f.newPassword !== f.confirm) return setMsg("Passwords do not match");
+
+    setSaving(true);
+    const res = await dispatch(
+      changePassword({
+        currentPassword: f.currentPassword,
+        newPassword: f.newPassword,
+      }),
+    );
+    setSaving(false);
+
+    if (!res.error) {
+      setMsg("Password changed successfully");
+      setF({ currentPassword: "", newPassword: "", confirm: "" });
+    }
+  };
+
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  return (
+    <section className={cardClass}>
+      <div className="border-b border-slate-100 px-5 py-5 dark:border-slate-800 sm:px-6">
+        <SectionHeading
+          eyebrow="Account"
+          title="Change my password"
+          description="Use at least 8 characters. You will stay signed in."
+        />
+      </div>
+
+      <form onSubmit={submit} className="space-y-5 p-5 sm:p-6">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+          <div>
+            <label htmlFor="cp-current" className={labelClass}>
+              Current password
+            </label>
+            <input
+              id="cp-current"
+              className={inputClass}
+              type="password"
+              autoComplete="current-password"
+              value={f.currentPassword}
+              onChange={set("currentPassword")}
+              required
+            />
+          </div>
+
+          <div>
+            <label htmlFor="cp-new" className={labelClass}>
+              New password
+            </label>
+            <input
+              id="cp-new"
+              className={inputClass}
+              type="password"
+              autoComplete="new-password"
+              minLength={8}
+              value={f.newPassword}
+              onChange={set("newPassword")}
+              required
+            />
+          </div>
+
+          <div>
+            <label htmlFor="cp-confirm" className={labelClass}>
+              Confirm new password
+            </label>
+            <input
+              id="cp-confirm"
+              className={inputClass}
+              type="password"
+              autoComplete="new-password"
+              minLength={8}
+              value={f.confirm}
+              onChange={set("confirm")}
+              required
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-slate-500 dark:text-slate-400">{msg}</p>
+          <button type="submit" disabled={saving} className={buttonClass}>
+            {saving ? "Updating..." : "Update password"}
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
 export default function UserManager() {
   const dispatch = useDispatch();
 
   const { user: me } = useSelector((s) => s.auth);
   const { list = [], roles = [], error } = useSelector((s) => s.users);
 
-  const canEdit = can(me, 'user', 'edit');
+  const canEdit = can(me, "user", "edit");
+
+  const [editing, setEditing] = useState(null);
 
   const [form, setForm] = useState({
-    email: '',
-    password: '',
-    roleId: '',
-    username: '',
-    name: '',
-    phone: '',
+    email: "",
+    password: "",
+    roleId: "",
+    username: "",
+    name: "",
+    phone: "",
   });
 
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -80,7 +310,7 @@ export default function UserManager() {
   useEffect(() => {
     if (roles.length && !form.roleId) {
       const defaultRole =
-        roles.find((role) => role.name === 'User') || roles[0];
+        roles.find((role) => role.name === "User") || roles[0];
 
       setForm((current) => ({
         ...current,
@@ -100,7 +330,11 @@ export default function UserManager() {
       user.name,
       user.phone,
       user.role?.name,
-    ].some((value) => String(value || '').toLowerCase().includes(query));
+    ].some((value) =>
+      String(value || "")
+        .toLowerCase()
+        .includes(query),
+    );
   });
 
   const submit = async (event) => {
@@ -115,11 +349,11 @@ export default function UserManager() {
       if (!result.error) {
         setForm((current) => ({
           ...current,
-          email: '',
-          password: '',
-          username: '',
-          name: '',
-          phone: '',
+          email: "",
+          password: "",
+          username: "",
+          name: "",
+          phone: "",
         }));
       }
     } finally {
@@ -128,9 +362,7 @@ export default function UserManager() {
   };
 
   const togglePerm = (role, resource, action) => {
-    const permissions = JSON.parse(
-      JSON.stringify(role.permissions || {})
-    );
+    const permissions = JSON.parse(JSON.stringify(role.permissions || {}));
 
     permissions[resource] = {
       view: false,
@@ -138,16 +370,15 @@ export default function UserManager() {
       ...(permissions[resource] || {}),
     };
 
-    permissions[resource][action] =
-      !permissions[resource][action];
+    permissions[resource][action] = !permissions[resource][action];
 
     // Editing a resource also requires viewing it.
-    if (action === 'edit' && permissions[resource].edit) {
+    if (action === "edit" && permissions[resource].edit) {
       permissions[resource].view = true;
     }
 
     // Viewing cannot be disabled while editing is enabled.
-    if (action === 'view' && !permissions[resource].view) {
+    if (action === "view" && !permissions[resource].view) {
       permissions[resource].edit = false;
     }
 
@@ -155,7 +386,7 @@ export default function UserManager() {
       saveRolePermissions({
         id: role._id,
         permissions,
-      })
+      }),
     );
   };
 
@@ -167,13 +398,10 @@ export default function UserManager() {
     }
   };
 
-  const adminCount = list.filter(
-    (user) => user.role?.name === 'Admin'
-  ).length;
+  const adminCount = list.filter((user) => user.role?.name === "Admin").length;
 
   return (
     <div className="mx-auto max-w-[1600px] space-y-7 text-slate-900 dark:text-slate-100">
-
       {/* Page header */}
       <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
@@ -190,8 +418,8 @@ export default function UserManager() {
           </h1>
 
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400">
-            Manage team members, assign roles, and control access
-            to prospects, companies, and user administration.
+            Manage team members, assign roles, and control access to prospects,
+            companies, and user administration.
           </p>
         </div>
 
@@ -211,7 +439,9 @@ export default function UserManager() {
             </svg>
           </div>
           <div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Total team members</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Total team members
+            </p>
             <p className="text-xl font-bold text-slate-900 dark:text-white">
               {list.length}
             </p>
@@ -227,7 +457,13 @@ export default function UserManager() {
               Total users
             </p>
             <span className="rounded-lg bg-indigo-50 p-2 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                className="h-5 w-5"
+              >
                 <circle cx="9" cy="8" r="4" />
                 <path d="M2 21v-2a7 7 0 0 1 14 0v2M19 8v6M22 11h-6" />
               </svg>
@@ -247,7 +483,13 @@ export default function UserManager() {
               Admin accounts
             </p>
             <span className="rounded-lg bg-violet-50 p-2 text-violet-600 dark:bg-violet-500/10 dark:text-violet-400">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                className="h-5 w-5"
+              >
                 <path d="m12 3 8 4v5c0 5-3.4 8-8 9-4.6-1-8-4-8-9V7l8-4Z" />
                 <path d="m9 12 2 2 4-4" />
               </svg>
@@ -267,7 +509,13 @@ export default function UserManager() {
               Available roles
             </p>
             <span className="rounded-lg bg-emerald-50 p-2 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                className="h-5 w-5"
+              >
                 <rect x="3" y="4" width="18" height="16" rx="2" />
                 <path d="M8 9h8M8 13h5" />
               </svg>
@@ -289,7 +537,13 @@ export default function UserManager() {
           className="flex items-start justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/60 dark:text-red-300"
         >
           <div className="flex gap-2">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mt-0.5 h-5 w-5 shrink-0">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              className="mt-0.5 h-5 w-5 shrink-0"
+            >
               <circle cx="12" cy="12" r="9" />
               <path d="M12 8v5M12 16h.01" />
             </svg>
@@ -343,11 +597,13 @@ export default function UserManager() {
                   id="new-password"
                   className={inputClass}
                   type="password"
-                  placeholder="At least 6 characters"
+                  placeholder="At least 8 characters"
                   autoComplete="new-password"
                   value={form.password}
-                  onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  minLength={6}
+                  onChange={(e) =>
+                    setForm({ ...form, password: e.target.value })
+                  }
+                  minLength={8}
                   required
                 />
               </div>
@@ -380,7 +636,9 @@ export default function UserManager() {
                   className={inputClass}
                   placeholder="johndoe"
                   value={form.username}
-                  onChange={(e) => setForm({ ...form, username: e.target.value })}
+                  onChange={(e) =>
+                    setForm({ ...form, username: e.target.value })
+                  }
                 />
               </div>
 
@@ -428,7 +686,13 @@ export default function UserManager() {
                   </>
                 ) : (
                   <>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      className="h-4 w-4"
+                    >
                       <path d="M12 5v14M5 12h14" />
                     </svg>
                     Add user
@@ -489,8 +753,7 @@ export default function UserManager() {
 
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filteredUsers.map((user) => {
-                const isMe =
-                  user._id === (me?.id || me?._id);
+                const isMe = user._id === (me?.id || me?._id);
 
                 return (
                   <tr
@@ -500,13 +763,13 @@ export default function UserManager() {
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-sm font-bold uppercase text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-500/20">
-                          {(user.name || user.username || user.email || '?')
+                          {(user.name || user.username || user.email || "?")
                             .trim()
                             .charAt(0)}
                         </div>
                         <div className="min-w-0">
                           <p className="truncate font-semibold text-slate-800 dark:text-slate-100">
-                            {user.name || '—'}
+                            {user.name || "—"}
                             {isMe && (
                               <span className="ml-2 text-xs font-medium text-indigo-600 dark:text-indigo-400">
                                 You
@@ -521,11 +784,11 @@ export default function UserManager() {
                     </td>
 
                     <td className="px-5 py-4 text-slate-600 dark:text-slate-300">
-                      {user.username || '—'}
+                      {user.username || "—"}
                     </td>
 
                     <td className="px-5 py-4 text-slate-600 dark:text-slate-300">
-                      {user.phone || '—'}
+                      {user.phone || "—"}
                     </td>
 
                     <td className="px-5 py-4">
@@ -533,19 +796,17 @@ export default function UserManager() {
                         <select
                           aria-label={`Role for ${user.email}`}
                           className="max-w-40 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:ring-indigo-500/20"
-                          value={user.role?._id || ''}
+                          value={user.role?._id || ""}
                           onChange={(e) =>
                             dispatch(
                               changeUserRole({
                                 id: user._id,
                                 roleId: e.target.value,
-                              })
+                              }),
                             )
                           }
                         >
-                          {!user.role?._id && (
-                            <option value="">No role</option>
-                          )}
+                          {!user.role?._id && <option value="">No role</option>}
                           {roles.map((role) => (
                             <option key={role._id} value={role._id}>
                               {role.name}
@@ -553,18 +814,27 @@ export default function UserManager() {
                           ))}
                         </select>
                       ) : (
-                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
-                          user.role?.name === 'Admin'
-                            ? 'bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300'
-                            : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
-                        }`}>
-                          {user.role?.name || 'Unassigned'}
+                        <span
+                          className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
+                            user.role?.name === "Admin"
+                              ? "bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300"
+                              : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                          }`}
+                        >
+                          {user.role?.name || "Unassigned"}
                         </span>
                       )}
                     </td>
 
                     {canEdit && (
                       <td className="px-6 py-4 text-right">
+                        <button
+                          type="button"
+                          onClick={() => setEditing(user)}
+                          className="mr-1 rounded-lg px-3 py-2 text-xs font-semibold text-indigo-600 transition hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-950/60"
+                        >
+                          Edit
+                        </button>
                         {isMe ? (
                           <span className="text-xs text-slate-400 dark:text-slate-500">
                             Current account
@@ -591,7 +861,13 @@ export default function UserManager() {
                     className="px-6 py-14 text-center"
                   >
                     <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-6 w-6">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        className="h-6 w-6"
+                      >
                         <circle cx="11" cy="11" r="7" />
                         <path d="m16 16 4 4" />
                       </svg>
@@ -637,9 +913,7 @@ export default function UserManager() {
               <span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" />
               Edit access
             </span>
-            <span>
-              Edit access also enables view access.
-            </span>
+            <span>Edit access also enables view access.</span>
           </div>
         </div>
 
@@ -685,7 +959,7 @@ export default function UserManager() {
 
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {roles.map((role) => {
-                const isAdmin = role.name === 'Admin';
+                const isAdmin = role.name === "Admin";
 
                 return (
                   <tr
@@ -706,8 +980,9 @@ export default function UserManager() {
                     </td>
 
                     {RESOURCES.flatMap((resource) =>
-                      ['view', 'edit'].map((action) => {
-                        const checked = !!role.permissions?.[resource]?.[action];
+                      ["view", "edit"].map((action) => {
+                        const checked =
+                          !!role.permissions?.[resource]?.[action];
 
                         return (
                           <td
@@ -728,7 +1003,7 @@ export default function UserManager() {
                             </label>
                           </td>
                         );
-                      })
+                      }),
                     )}
                   </tr>
                 );
@@ -757,6 +1032,17 @@ export default function UserManager() {
         )}
       </section>
 
+      {/* Change my password (available to every role) */}
+      <ChangePasswordCard />
+
+      {/* Edit user modal */}
+      {editing && (
+        <EditUserModal
+          user={editing}
+          roles={roles}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </div>
   );
 }

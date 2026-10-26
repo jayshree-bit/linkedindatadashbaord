@@ -3,8 +3,8 @@ import { authenticate, authorize } from "../middleware/auth.js";
 import * as users from "../controllers/user.controller.js";
 import * as data from "../controllers/data.controller.js";
 import multer from 'multer';
-import { importProspectsExcel, getImportStatus } from '../controllers/data.controller.js';
-
+import { importProspectsExcel, getImportStatus, getDashboard } from '../controllers/data.controller.js';
+import { importCompaniesExcel, getCompanyImportStatus } from '../controllers/companyImport.controller.js';
 const r = Router();
 r.use(authenticate); // everything below needs a valid token
 
@@ -35,6 +35,13 @@ r.get(
   authorize("prospect", "view"),
   data.getProspectDashboardStats
 );
+r.get(
+  "/dashboard",
+  authorize("prospect", "view"),
+  getDashboard
+);
+
+
 const excelUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 },
@@ -57,6 +64,19 @@ r.get(
   "/data/prospect/import-excel/:jobId",
   authorize("prospect", "edit"),
   getImportStatus,
+);
+
+r.post(
+  '/data/company/import-excel',
+  authorize('company', 'edit'),
+  excelUpload.single('file'),
+  importCompaniesExcel
+);
+
+r.get(
+  '/data/company/import-excel/:jobId',
+  authorize('company', 'edit'),
+  getCompanyImportStatus
 );
 
 export default r;
