@@ -15,7 +15,7 @@ import notificationRoutes from './src/routes/notification.routes.js';
 const app = express();
 const server = createServer(app);
 
-const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+const clientUrl = process.env.CLIENT_URL || 'https://prospectdash.netlify.app';
 
 app.use(cors({
   origin: clientUrl,
