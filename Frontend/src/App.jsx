@@ -12,7 +12,7 @@ import Prospects from './pages/Prospects/Prospects';
 import Companies from './pages/Companies';
 import UserManager from './pages/UserManager';
 import DashboardProspects from './pages/Prospects/Dashboard';
-
+import NotificationPage from './pages/NotificationPage';
 export default function App() {
   const dispatch = useDispatch();
   const { initialized, user } = useSelector((state) => state.auth);
@@ -61,7 +61,10 @@ export default function App() {
             </ProtectedRoute>
           }
         />
-
+<Route
+  path="/notifications"
+  element={<NotificationPage />}
+/>
         {/* Permission-protected pages */}
         <Route
           path="/prospects/viewall"
