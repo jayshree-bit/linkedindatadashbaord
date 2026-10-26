@@ -1,16 +1,18 @@
-
 import * as auth from "../services/auth.service.js";
 import User from "../models/User.js";
 import bcrypt from "bcryptjs";
 
-
+// "lax" works because the Netlify proxy makes the API same-site with the frontend.
 const cookieOptions = {
   httpOnly: true,
   secure: true,
-  sameSite: "none",
+  sameSite: "lax",
   path: "/",
   maxAge: 24 * 60 * 60 * 1000,
 };
+
+// clearCookie only works when the options match the ones used to set it
+const { maxAge, ...clearOptions } = cookieOptions;
 
 export const login = async (req, res, next) => {
   try {
@@ -30,13 +32,7 @@ export const login = async (req, res, next) => {
 };
 
 export const logoutController = (req, res) => {
-  res.clearCookie("token", {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-  });
-
+  res.clearCookie("token", clearOptions);
   res.json({ message: "Logged out successfully" });
 };
 
@@ -73,7 +69,6 @@ export const changePassword = async (req, res, next) => {
       });
     }
 
-    // Find the logged-in user
     const user = await User.findById(req.user._id);
 
     if (!user) {
@@ -82,11 +77,7 @@ export const changePassword = async (req, res, next) => {
       });
     }
 
-    // Verify current password
-    const isMatch = await bcrypt.compare(
-      currentPassword,
-      user.password
-    );
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
 
     if (!isMatch) {
       return res.status(400).json({
@@ -100,7 +91,6 @@ export const changePassword = async (req, res, next) => {
       });
     }
 
-    // Hash and save the new password
     user.password = await bcrypt.hash(newPassword, 10);
     await user.save();
 

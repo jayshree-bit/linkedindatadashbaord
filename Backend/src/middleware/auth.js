@@ -1,26 +1,44 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 
-
 export const authenticate = async (req, res, next) => {
   try {
-    // Prefer the Authorization Bearer token; fall back to the cookie.
     const authHeader = req.headers.authorization;
 
-    const bearerToken =
-      authHeader?.startsWith('Bearer ')
-        ? authHeader.slice(7).trim()
-        : null;
+    const bearerToken = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7).trim()
+      : null;
 
-    const token = bearerToken || req.cookies?.token;
+    // Try the Bearer token first, then fall back to the cookie.
+    // A stale Bearer token no longer blocks a valid cookie.
+    const candidates = [bearerToken, req.cookies?.token].filter(Boolean);
 
-    if (!token) {
+    if (!candidates.length) {
       return res.status(401).json({
         message: 'Login required. Provide a Bearer token or login cookie.',
       });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    let decoded = null;
+    let lastError = null;
+
+    for (const token of candidates) {
+      try {
+        decoded = jwt.verify(token, process.env.JWT_SECRET);
+        break;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (!decoded) {
+      return res.status(401).json({
+        message:
+          lastError?.name === 'TokenExpiredError'
+            ? 'Token expired. Please log in again.'
+            : 'Invalid or expired token',
+      });
+    }
 
     if (!decoded.id) {
       return res.status(401).json({
@@ -39,15 +57,9 @@ export const authenticate = async (req, res, next) => {
     req.user = user;
     next();
   } catch (error) {
-    return res.status(401).json({
-      message:
-        error.name === 'TokenExpiredError'
-          ? 'Token expired. Please log in again.'
-          : 'Invalid or expired token',
-    });
+    next(error);
   }
 };
-
 
 // authorize('user', 'edit')  or  authorize(req => resource, req => action)
 export const authorize = (resource, action) => (req, res, next) => {
