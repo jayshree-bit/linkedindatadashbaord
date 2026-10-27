@@ -61,7 +61,7 @@ const TEMPLATE_URL = '/templates/CompaniesSampleTemplete.xlsx';
           <div>
             <h2 className="text-lg font-bold text-slate-900 dark:text-white">Import companies</h2>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Upload an .xlsx file. Duplicates are checked by company name and email address.
+              Upload an .xlsx file. Duplicates are checked by Company name or Country.
             </p>
           </div>
           <button
