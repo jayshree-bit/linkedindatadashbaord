@@ -78,5 +78,6 @@ const prospectSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
+prospectSchema.index({ createdAt: -1, _id: -1 });
+prospectSchema.index({ uploadedBy: 1, status: 1 });
 export default mongoose.model('Prospect', prospectSchema);

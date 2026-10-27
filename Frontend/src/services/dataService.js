@@ -58,23 +58,40 @@ export const getDistinctApi = (
     .then((response) => response.data);
 
 // Download every record matching the current search / sort / column filters as .xlsx.
-export const exportRowsApi = (
-  resource,
-  { search = '', sortBy = '', sortOrder = 'asc', filters = {}, columns = [] } = {}
-) =>
-  api
-    .get(`/private/data/${resource}/export`, {
-      params: {
-        search,
-        sortBy,
-        sortOrder,
-        filters: Object.keys(filters).length ? JSON.stringify(filters) : '',
-        columns: JSON.stringify(columns),
-      },
-      responseType: 'blob',
-      timeout: 0, // large exports can take a while
-    })
-    .then((response) => response.data);
+
+const exportParams = ({ columns, filters, ...rest }) => ({
+  ...rest,
+  filters: JSON.stringify(filters ?? {}),
+  columns: JSON.stringify(columns ?? []),
+});
+
+export const exportStartApi = async (resource, params) =>
+  (await api.get(`/private/data/${resource}/export-start`, { params: exportParams(params) })).data;
+
+export const exportStatusApi = async (resource, jobId) =>
+  (await api.get(`/private/data/${resource}/export-status/${jobId}`)).data;
+
+export const exportFileApi = async (resource, jobId) =>
+  (await api.get(`/private/data/${resource}/export-file/${jobId}`, {
+    responseType: "blob",
+    timeout: 0,
+  })).data;
+export const exportRowsApi = async (resource, params, onProgress) => {
+  const { columns, filters, ...rest } = params;
+
+  const res = await api.get(`/private/data/${resource}/export`, {
+    params: {
+      ...rest,
+      filters: JSON.stringify(filters ?? {}),
+      columns: JSON.stringify(columns ?? []),
+    },
+    responseType: 'blob',
+    timeout: 0, // no timeout for big exports
+    onDownloadProgress: (e) => onProgress?.(e.loaded),
+  });
+
+  return res.data;
+};
 
 
 export const importProspectsApi = (status, file,uploadedBy, onProgress) => {

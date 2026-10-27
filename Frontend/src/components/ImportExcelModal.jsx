@@ -27,7 +27,7 @@ export default function ImportExcelModal({ onClose, onImported }) {
   const [file, setFile] = useState(null);
   const [localError, setLocalError] = useState('');
   const inputRef = useRef(null);
-const TEMPLATE_URL = '/templates/Prospect_Import_Template.xlsx';
+const TEMPLATE_URL = '/templates/Sample_Import_Template.xlsx';
   // Start and finish with a clean import state so an old result never shows up.
   useEffect(() => {
     dispatch(resetImport());

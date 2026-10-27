@@ -280,7 +280,8 @@ export const fieldFor = (resource, gridKey) => resolveField(resource, gridKey);
 
 export const exportCursor = (
   resource,
-  { search = '', sortBy = '', sortOrder = 'asc', filters = '' } = {}
+  { search = '', sortBy = '', sortOrder = 'asc', filters = '' } = {},
+  dbFields = []
 ) => {
   const Model = getModel(resource);
   const filter = buildFilter(resource, { search, filters });
@@ -290,9 +291,17 @@ export const exportCursor = (
     ? { [sortField]: sortOrder === 'desc' ? -1 : 1, _id: -1 }
     : { createdAt: -1, _id: -1 };
 
-  return Model.find(filter)
+  // Fetch only the columns being exported
+  const safeFields = [...new Set(dbFields.filter(isSafeKey))];
+  const projection = safeFields.length
+    ? Object.fromEntries(safeFields.map((f) => [f, 1]))
+    : undefined;
+
+  // No collation: it blocks index use for the sort and slows large exports.
+  return Model.find(filter, projection)
     .sort(sort)
-    .collation({ locale: 'en', strength: 2 })
+    .allowDiskUse(true)
+    .batchSize(2000)
     .lean()
     .cursor();
 };

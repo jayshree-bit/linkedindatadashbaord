@@ -19,7 +19,9 @@ import {
   patchLocal,
 } from '../features/dataSlice';
 import { can } from '../features/authSlice';
-import { getDistinctApi, exportRowsApi } from '../services/dataService';
+import { getDistinctApi, exportRowsApi,  exportStartApi,
+  exportStatusApi,
+  exportFileApi, } from '../services/dataService';
 import './DataGridPage.css';
 import ImportExcelModal from './ImportExcelModal';
 import CompanyImportModal from './CompanyImportModal';
@@ -441,10 +443,10 @@ export default function DataGridPage({
   const [visibleKeys, setVisibleKeys] = useState(() => fields.map((f) => f.key));
   const [columnOrder, setColumnOrder] = useState(() => fields.map((f) => f.key));
 const [importOpen, setImportOpen] = useState(false);
-
+const [exportBytes, setExportBytes] = useState(0);
   const sortBy = sortColumns[0]?.columnKey ?? '';
   const sortOrder = sortColumns[0]?.direction === 'DESC' ? 'desc' : 'asc';
-
+const [exportStatus, setExportStatus] = useState('');
   // Column filters typed by the user + locked filters from the URL (locked ones win).
   const fixedKey = JSON.stringify(fixedFilters);
   const effectiveFilters = useMemo(
@@ -624,38 +626,49 @@ const [importOpen, setImportOpen] = useState(false);
       dispatch(updateRow({ resource, id: row._id, changes }));
     });
   };
+const exportExcel = async () => {
+  setExporting(true);
+  setExportStatus('Preparing export...');
+  try {
+    const exportColumns = orderedFields
+      .filter((f) => visibleKeys.includes(f.key))
+      .map((f) => ({ key: f.key, name: f.name }));
 
-  const exportExcel = async () => {
-    setExporting(true);
-    try {
-      // Same search, sort and filters as the grid, and only the visible columns.
-      const exportColumns = orderedFields
-        .filter((f) => visibleKeys.includes(f.key))
-        .map((f) => ({ key: f.key, name: f.name }));
+    const { jobId } = await exportStartApi(resource, {
+      search,
+      sortBy,
+      sortOrder,
+      filters: effectiveFilters,
+      columns: exportColumns,
+    });
 
-      const blob = await exportRowsApi(resource, {
-        search,
-        sortBy,
-        sortOrder,
-        filters: effectiveFilters,
-        columns: exportColumns,
-      });
-
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${resource}-${new Date().toISOString().slice(0, 10)}.xlsx`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    } catch {
-      window.alert('Export failed. Please try again.');
-    } finally {
-      setExporting(false);
+    // Poll every second until the file is ready.
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const s = await exportStatusApi(resource, jobId);
+      if (s.state === 'failed') throw new Error(s.error || 'Export failed');
+      if (s.state === 'done') break;
+      setExportStatus(`Exporting... ${s.processed.toLocaleString()} rows`);
     }
-  };
 
+    setExportStatus('Downloading...');
+    const blob = await exportFileApi(resource, jobId);
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${resource}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch {
+    window.alert('Export failed. Please try again.');
+  } finally {
+    setExporting(false);
+    setExportStatus('');
+  }
+};
   const onImported = () => {
     // Reload the current view (the fetch effect will not re-run if page/filters are unchanged).
     setPage(1);
@@ -753,15 +766,15 @@ const [importOpen, setImportOpen] = useState(false);
               </button>
             )}
 
-            <button
-              type="button"
-              className="dgp-btn dgp-btn-success"
-              onClick={exportExcel}
-              disabled={exporting || pagination.total === 0}
-              title="Download all rows matching the current search, sort and filters"
-            >
-              {exporting ? 'Exporting...' : `Export Excel (${pagination.total.toLocaleString()})`}
-            </button>
+          <button
+            type="button"
+            className="dgp-btn dgp-btn-success"
+            onClick={exportExcel}
+            disabled={exporting || pagination.total === 0}
+            title="Download all rows matching the current search, sort and filters"
+          >
+           {exporting ? exportStatus || 'Exporting...' : `Export Excel (${pagination.total.toLocaleString()})`}
+          </button>
 
             <div className="dgp-menu-wrap">
               <button
@@ -857,23 +870,31 @@ const [importOpen, setImportOpen] = useState(false);
         {error && <div className="dgp-alert">{String(error)}</div>}
 
         <div className={`dgp-grid ${loading ? 'is-loading' : ''}`}>
-          <HeaderCtx.Provider value={headerCtx}>
-            <DataGrid
-              className="rdg-light ag-like"
-              columns={columns}
-              rows={rows}
-              rowKeyGetter={(row) => row._id}
-              onRowsChange={onRowsChange}
-              rowHeight={42}
-              headerRowHeight={84}
-              rowClass={(_, index) => (index % 2 ? 'ag-row-alt' : undefined)}
-              defaultColumnOptions={{ resizable: true }}
-            />
-          </HeaderCtx.Provider>
-          {!loading && rows.length === 0 && (
-            <div className="dgp-empty">No records match your search or filters.</div>
-          )}
-        </div>
+  <HeaderCtx.Provider value={headerCtx}>
+    <DataGrid
+      className="rdg-light ag-like"
+      columns={columns}
+      rows={rows}
+      rowKeyGetter={(row) => row._id}
+      onRowsChange={onRowsChange}
+      rowHeight={42}
+      headerRowHeight={84}
+      rowClass={(_, index) => (index % 2 ? 'ag-row-alt' : undefined)}
+      defaultColumnOptions={{ resizable: true }}
+    />
+  </HeaderCtx.Provider>
+
+  {loading && (
+    <div className="dgp-loader" role="status" aria-live="polite">
+      <span className="dgp-spinner" />
+      <span className="dgp-loader-text">Loading data...</span>
+    </div>
+  )}
+
+  {!loading && rows.length === 0 && (
+    <div className="dgp-empty">No records match your search or filters.</div>
+  )}
+</div>
 
         <div className="dgp-foot">
           <span className="dgp-muted">

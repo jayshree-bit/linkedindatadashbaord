@@ -221,6 +221,7 @@ export const distinctValues = wrap((req) =>
 /* ====================================================================
    Excel export (streams .xlsx, respects search + sort + column filters)
    ==================================================================== */
+
 const MAX_EXPORT_ROWS = 100000;
 
 const toCell = (value) => {
@@ -242,23 +243,28 @@ export const exportExcel = async (req, res, next) => {
     } catch {
       requested = [];
     }
+
     let columns = (Array.isArray(requested) ? requested : [])
       .filter((c) => c && typeof c.key === "string" && c.key)
       .slice(0, 100)
       .map((c) => ({ key: c.key, name: String(c.name || c.key) }));
 
-    cursor = svc.exportCursor(resource, req.query);
-
-    // No columns sent: fall back to the keys of the first record.
+    let dbFields = columns.map((c) => svc.fieldFor(resource, c.key));
     let first = null;
-    if (columns.length === 0) {
+
+    if (columns.length > 0) {
+      // Projection: only the visible columns are read from MongoDB.
+      cursor = svc.exportCursor(resource, req.query, dbFields);
+    } else {
+      // No columns sent: read everything and use the first record's keys.
+      cursor = svc.exportCursor(resource, req.query);
       first = await cursor.next();
       columns = Object.keys(first || {})
         .filter((k) => !["_id", "__v"].includes(k))
         .map((k) => ({ key: k, name: k }));
+      dbFields = columns.map((c) => svc.fieldFor(resource, c.key));
     }
 
-    const dbFields = columns.map((c) => svc.fieldFor(resource, c.key));
     const stamp = new Date().toISOString().slice(0, 10);
 
     res.setHeader(
@@ -269,17 +275,21 @@ export const exportExcel = async (req, res, next) => {
       "Content-Disposition",
       `attachment; filename="${resource}-${stamp}.xlsx"`,
     );
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Accel-Buffering", "no"); // stops nginx from buffering the stream
 
     const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
       stream: res,
       useStyles: true,
+      useSharedStrings: false,
+      zip: { zlib: { level: 1 } }, // fast compression
     });
+
     const sheet = workbook.addWorksheet(resource, {
       views: [{ state: "frozen", ySplit: 1 }],
     });
 
     sheet.columns = columns.map((c) => ({
-      key: c.key,
       width: Math.min(40, Math.max(14, c.name.length + 4)),
     }));
     sheet.autoFilter = { from: "A1", to: { row: 1, column: columns.length } };
@@ -293,11 +303,12 @@ export const exportExcel = async (req, res, next) => {
     };
     header.commit();
 
+    // Array rows are faster than keyed-object rows.
     const writeRow = (doc) => {
-      const values = {};
-      columns.forEach((c, i) => {
-        values[c.key] = toCell(doc[dbFields[i]]);
-      });
+      const values = new Array(dbFields.length);
+      for (let i = 0; i < dbFields.length; i++) {
+        values[i] = toCell(doc[dbFields[i]]);
+      }
       sheet.addRow(values).commit();
     };
 
@@ -325,6 +336,150 @@ export const exportExcel = async (req, res, next) => {
     if (res.headersSent) res.destroy(e);
     else next(e);
   }
+};
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const exportJobs = new Map();
+const EXPORT_TTL_MS = 15 * 60 * 1000;
+
+const cleanupJob = (id) => {
+  const job = exportJobs.get(id);
+  if (job?.file) fs.promises.unlink(job.file).catch(() => {});
+  exportJobs.delete(id);
+};
+
+const parseColumns = (raw) => {
+  let requested = [];
+  try {
+    requested = JSON.parse(raw || "[]");
+  } catch {
+    requested = [];
+  }
+  return (Array.isArray(requested) ? requested : [])
+    .filter((c) => c && typeof c.key === "string" && c.key)
+    .slice(0, 100)
+    .map((c) => ({ key: c.key, name: String(c.name || c.key) }));
+};
+
+async function buildExportFile(job, resource, query) {
+  let cursor;
+  try {
+    let columns = parseColumns(query.columns);
+    let dbFields = columns.map((c) => svc.fieldFor(resource, c.key));
+    let first = null;
+
+    if (columns.length) {
+      cursor = svc.exportCursor(resource, query, dbFields);
+    } else {
+      cursor = svc.exportCursor(resource, query);
+      first = await cursor.next();
+      columns = Object.keys(first || {})
+        .filter((k) => !["_id", "__v"].includes(k))
+        .map((k) => ({ key: k, name: k }));
+      dbFields = columns.map((c) => svc.fieldFor(resource, c.key));
+    }
+
+    const file = path.join(os.tmpdir(), `export-${job.id}.xlsx`);
+    const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
+      filename: file,
+      useStyles: true,
+      useSharedStrings: false,
+      zip: { zlib: { level: 1 } },
+    });
+    const sheet = workbook.addWorksheet(resource, {
+      views: [{ state: "frozen", ySplit: 1 }],
+    });
+
+    sheet.columns = columns.map((c) => ({
+      width: Math.min(40, Math.max(14, c.name.length + 4)),
+    }));
+    sheet.autoFilter = { from: "A1", to: { row: 1, column: columns.length } };
+
+    const header = sheet.addRow(columns.map((c) => c.name));
+    header.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    header.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF4F46E5" },
+    };
+    header.commit();
+
+    const writeRow = (doc) => {
+      const values = new Array(dbFields.length);
+      for (let i = 0; i < dbFields.length; i++) {
+        values[i] = toCell(doc[dbFields[i]]);
+      }
+      sheet.addRow(values).commit();
+    };
+
+    let count = 0;
+    if (first) {
+      writeRow(first);
+      count += 1;
+    }
+    for await (const doc of cursor) {
+      if (count >= MAX_EXPORT_ROWS) break;
+      writeRow(doc);
+      count += 1;
+      if (count % 500 === 0) job.processed = count;
+    }
+
+    await sheet.commit();
+    await workbook.commit();
+
+    job.processed = count;
+    job.file = file;
+    job.fileName = `${resource}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    job.state = "done";
+  } catch (e) {
+    if (cursor) cursor.close().catch(() => {});
+    job.state = "failed";
+    job.error = e.message || "Export failed.";
+  } finally {
+    setTimeout(() => cleanupJob(job.id), EXPORT_TTL_MS).unref?.();
+  }
+}
+
+export const startExport = (req, res) => {
+  const job = {
+    id: randomUUID(),
+    userId: String(req.user?._id || req.user?.id || ""),
+    state: "running",
+    processed: 0,
+    file: null,
+    fileName: "",
+    error: null,
+  };
+  exportJobs.set(job.id, job);
+
+  res.status(202).json({ jobId: job.id });
+
+  // Not awaited: the response is already sent.
+  buildExportFile(job, req.params.resource, req.query);
+};
+
+const ownJob = (req) => {
+  const job = exportJobs.get(req.params.jobId);
+  const uid = String(req.user?._id || req.user?.id || "");
+  return job && job.userId === uid ? job : null;
+};
+
+export const exportStatus = (req, res) => {
+  const job = ownJob(req);
+  if (!job) {
+    return res.status(404).json({ message: "Export not found or expired." });
+  }
+  res.json({ state: job.state, processed: job.processed, error: job.error });
+};
+
+export const exportFile = (req, res) => {
+  const job = ownJob(req);
+  if (!job || job.state !== "done" || !job.file) {
+    return res.status(404).json({ message: "Export not ready or expired." });
+  }
+  res.download(job.file, job.fileName);
 };
 
 /* ====================================================================

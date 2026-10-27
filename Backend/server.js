@@ -11,6 +11,7 @@ import publicRoutes from './src/routes/public.routes.js';
 import authRoutes from './src/routes/auth.routes.js';
 import privateRoutes from './src/routes/private.routes.js';
 import notificationRoutes from './src/routes/notification.routes.js';
+import compression from 'compression';
 
 const app = express();
 const server = createServer(app);
@@ -35,7 +36,12 @@ app.use(
     credentials: true,
   })
 );
-
+app.use(
+  compression({
+    filter: (req, res) =>
+      req.originalUrl.includes('/export') ? false : compression.filter(req, res),
+  })
+);
 const io = new Server(server, {
   cors: {
     origin: allowedOrigins,

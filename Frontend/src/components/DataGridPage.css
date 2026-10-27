@@ -626,3 +626,46 @@
 .imp-dups th,
 .imp-dups td { text-align: left; padding: 5px 8px; border-bottom: 1px solid #f1f5f9; }
 .dgp-btn-primary { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+
+.dgp-grid {
+  position: relative;
+ 
+}
+
+/* Covers only the table body, below the 84px header row */
+.dgp-loader {
+  position: absolute;
+  top: 84px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(1px);
+}
+
+.dgp-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid #e0e7ff;
+  border-top-color: #4f46e5;
+  border-radius: 50%;
+  animation: dgp-spin 0.7s linear infinite;
+}
+
+.dgp-loader-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: #4f46e5;
+}
+
+@keyframes dgp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

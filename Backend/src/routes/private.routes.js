@@ -21,7 +21,9 @@ const resource = (req) => req.params.resource;
 const action = (req) => (req.method === "GET" ? "view" : "edit");
 r.get("/data/:resource", authorize(resource, action), data.getAll);
 r.get("/data/:resource/export", authorize(resource, action), data.exportExcel);
-
+r.get("/data/:resource/export-start", authorize(resource, action), data.startExport);
+r.get("/data/:resource/export-status/:jobId", authorize(resource, action), data.exportStatus);
+r.get("/data/:resource/export-file/:jobId", authorize(resource, action), data.exportFile);
 r.post("/data/:resource", authorize(resource, action), data.add);
 r.put("/data/:resource/:id", authorize(resource, action), data.edit);
 r.delete("/data/:resource/:id", authorize(resource, action), data.del);
