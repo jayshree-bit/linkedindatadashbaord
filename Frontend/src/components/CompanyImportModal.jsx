@@ -27,7 +27,7 @@ export default function CompanyImportModal({ open, onClose, onDone }) {
   const dispatch = useDispatch();
   const fileRef = useRef(null);
   const [file, setFile] = useState(null);
-const TEMPLATE_URL = '/templates/company_import_template.xlsx';
+const TEMPLATE_URL = '/templates/CompaniesSampleTemplete.xlsx';
   const { user } = useSelector((state) => state.auth);
   const { loading, phase, progress, stage, percent, processed, total, result, error } =
     useSelector((state) => state.data.importState);

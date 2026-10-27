@@ -74,6 +74,8 @@ const prospectSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    uploadedByName: { type: String, trim: true, default: '' },
+
     importBatchId: { type: String, trim: true, default: '', index: true },
   },
   { timestamps: true }

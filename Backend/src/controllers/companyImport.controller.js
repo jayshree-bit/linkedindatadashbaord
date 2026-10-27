@@ -2,45 +2,35 @@ import ExcelJS from 'exceljs';
 import { randomUUID } from 'crypto';
 import Company from '../models/Company.js';
 import { emitImportCompleted } from '../utils/importNotifications.js';
-/* Excel header (lowercase) -> Company schema field.
-   Headers not listed here are kept in additionalData, so nothing is lost. */
+
+/* Excel header (lowercase) -> Company field. Only these columns are imported. */
 const COLUMN_MAP = {
   'company name': 'name',
-  name: 'name',
-  'email address': 'emailAddress',
-  'company email': 'emailAddress',
-  'company email address': 'emailAddress',
-  email: 'emailAddress',
-
-  industry: 'industry',
-  'main industry': 'industry',
-  'sub industry': 'subIndustry',
-  website: 'website',
-  'company domain': 'domain',
-  domain: 'domain',
-  'company linkedin url': 'linkedinUrl',
-  'linkedin url': 'linkedinUrl',
-
+  'email format': 'emailAddress',
+  'phone number': 'phoneNumber',
   'address 1': 'address1',
-  'address 2': 'address2',
   city: 'city',
   state: 'state',
   zipcode: 'zipcode',
   country: 'country',
-  'address link': 'addressLink',
-
-  'employee size': 'employeeSize',
+  'main industry': 'industry',
+  'sub industry': 'subIndustry',
   'see all employee size': 'exactEmployeeSize',
-  'exact employee size': 'exactEmployeeSize',
+  'employee size bracket': 'employeeSize',
   'exact revenue': 'exactRevenue',
-  revenue: 'revenue',
+  'revenue bracket': 'revenue',
+  'company domain': 'domain',
+  website: 'website',
+  'company linkedin url': 'linkedinUrl',
   'revenue link': 'revenueLink',
-
   'sic code': 'sicCode',
   'naics code': 'naicsCode',
-  'ra comments': 'raComments',
-  'ra comment': 'raComments',
+  'agent comments': 'raComments',
+  'address link': 'addressLink',
   'call notes': 'callNotes',
+  note1: 'note1',
+  note2: 'note2',
+  note3: 'note3',
 };
 
 const INSERT_CHUNK = 1000;
@@ -58,14 +48,16 @@ const chunk = (arr, size) => {
   return out;
 };
 
+// Trim, and treat "-" as empty.
 const clean = (v) => {
   const s = String(v ?? '').trim();
   return s === '-' ? '' : s;
 };
-const nameKeyOf = (v) => clean(v).toLowerCase();
+const keyOf = (v) => clean(v).toLowerCase();
 const emailOf = (v) => clean(v).replace(/^mailto:/i, '').toLowerCase();
 
-const safeKey = (s) => String(s).replace(/[.$]/g, '_').trim().slice(0, 100);
+// Duplicate key: same company name AND same country.
+const dupKey = (name, country) => `${keyOf(name)}|${keyOf(country)}`;
 
 function getExcelValue(cell) {
   const value = cell.value;
@@ -93,78 +85,59 @@ async function parseCompanies(buffer) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
   const sheet = workbook.worksheets[0];
-  if (!sheet) return [];
+  if (!sheet) return { rows: [], missingName: false };
 
-  const columns = {}; // colNumber -> { field } | { extra }
-  let recognised = 0;
+  // colNumber -> schema field (unknown headers are ignored)
+  const colToField = {};
   sheet.getRow(1).eachCell({ includeEmpty: false }, (cell, colNumber) => {
-    const header = String(getExcelValue(cell)).trim();
-    if (!header) return;
-    const field = COLUMN_MAP[header.toLowerCase()];
-    if (field) {
-      columns[colNumber] = { field };
-      recognised += 1;
-    } else {
-      columns[colNumber] = { extra: safeKey(header) };
-    }
+    const field = COLUMN_MAP[String(getExcelValue(cell)).trim().toLowerCase()];
+    if (field) colToField[colNumber] = field;
   });
-  if (!recognised) return [];
+
+  if (!Object.values(colToField).includes('name')) {
+    return { rows: [], missingName: true };
+  }
 
   const rows = [];
   sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
     if (rowNumber === 1) return;
 
     const company = {};
-    const extra = {};
     let hasData = false;
 
-    for (const [colNumber, target] of Object.entries(columns)) {
-      let value = getExcelValue(row.getCell(Number(colNumber)));
-      if (typeof value === 'string') value = value.trim();
-      if (value === '' || value == null) continue;
+    for (const [colNumber, field] of Object.entries(colToField)) {
+      let value = clean(getExcelValue(row.getCell(Number(colNumber))));
+      if (!value) continue;
+
+      if (field === 'exactEmployeeSize') value = value.replace(/,/g, '');
+      if (field === 'emailAddress') value = emailOf(value);
+
+      company[field] = value;
       hasData = true;
-
-      if (target.field === 'exactEmployeeSize') {
-        const n = Number(String(value).replace(/,/g, ''));
-        if (Number.isFinite(n)) company.exactEmployeeSize = n;
-      } else if (target.field) {
-        company[target.field] = String(value);
-      } else {
-        extra[target.extra] = value;
-      }
     }
 
-    if (hasData) {
-      if (Object.keys(extra).length) company.additionalData = extra;
-      rows.push(company);
-    }
+    if (hasData) rows.push(company);
   });
 
-  return rows;
+  return { rows, missingName: false };
 }
 
-/* Look up existing companies in batches so large $in lists stay fast. */
-async function findExisting(names, emails, onStep) {
-  const existingNames = new Set();
-  const existingEmails = new Set();
-
-  const nameParts = chunk(names, LOOKUP_CHUNK);
-  const emailParts = chunk(emails, LOOKUP_CHUNK);
-  const totalSteps = nameParts.length + emailParts.length;
+/* Existing companies: look up by name in batches, then compare name + country. */
+async function findExisting(names, onStep) {
+  const existing = new Set();
+  const parts = chunk(names, LOOKUP_CHUNK);
   let step = 0;
 
-  for (const part of nameParts) {
-    const docs = await Company.find({ nameKey: { $in: part } }, { nameKey: 1 }).lean();
-    docs.forEach((d) => existingNames.add(d.nameKey));
-    onStep?.(++step, totalSteps);
-  }
-  for (const part of emailParts) {
-    const docs = await Company.find({ emailAddress: { $in: part } }, { emailAddress: 1 }).lean();
-    docs.forEach((d) => existingEmails.add(emailOf(d.emailAddress)));
-    onStep?.(++step, totalSteps);
+  for (const part of parts) {
+    const docs = await Company.find(
+      { nameKey: { $in: part } },
+      { name: 1, nameKey: 1, country: 1 },
+    ).lean();
+    docs.forEach((d) => existing.add(dupKey(d.name ?? d.nameKey, d.country)));
+    onStep?.(++step, parts.length);
   }
 
-  return { existingNames, existingEmails };
+  return existing;
 }
 
 const insertInChunks = async (docs, onChunk) => {
@@ -185,33 +158,37 @@ const insertInChunks = async (docs, onChunk) => {
   }
   return { inserted, errors };
 };
+
 async function runImportJob(job, { buffer, uploader, io }) {
   try {
     updateJob(job, { stage: 'Reading file', percent: 3 });
 
-    const parsed = await parseCompanies(buffer);
+    const { rows: parsed, missingName } = await parseCompanies(buffer);
+    if (missingName) {
+      return updateJob(job, {
+        state: 'failed',
+        error: 'The file has no "Company Name" column.',
+      });
+    }
     if (!parsed.length) {
       return updateJob(job, {
         state: 'failed',
-        error: 'No valid rows or recognised column headers found in the file.',
+        error: 'No valid rows found in the file.',
       });
     }
 
     const importBatchId = randomUUID();
 
     const rows = [];
-    const invalid = [];
+    let invalidCount = 0;
     for (const p of parsed) {
-      const name = clean(p.name);
-      if (!name) {
-        invalid.push(p);
+      if (!p.name) {
+        invalidCount += 1; // company name is required
         continue;
       }
       rows.push({
         ...p,
-        name,
-        nameKey: nameKeyOf(name),
-        emailAddress: emailOf(p.emailAddress) || undefined,
+        nameKey: keyOf(p.name),
         uploadedBy: uploader.id,
         uploadedByName: uploader.name,
         importBatchId,
@@ -219,42 +196,36 @@ async function runImportJob(job, { buffer, uploader, io }) {
     }
 
     updateJob(job, { percent: 10, totalRows: parsed.length });
-
     updateJob(job, { stage: 'Checking duplicates', processed: null, total: null });
 
     const names = [...new Set(rows.map((r) => r.nameKey))];
-    const emails = [...new Set(rows.map((r) => r.emailAddress).filter(Boolean))];
-
-    const { existingNames, existingEmails } = await findExisting(names, emails, (done, total) =>
-      updateJob(job, { percent: scale(10, 30, done, total) })
+    const existing = await findExisting(names, (done, total) =>
+      updateJob(job, { percent: scale(10, 30, done, total) }),
     );
 
-    const seenNames = new Set();
-    const seenEmails = new Set();
+    const seen = new Set();
     const uniqueRows = [];
     const duplicates = [];
 
     for (const row of rows) {
-      const dupDb =
-        existingNames.has(row.nameKey) || (row.emailAddress && existingEmails.has(row.emailAddress));
-      const dupFile =
-        seenNames.has(row.nameKey) || (row.emailAddress && seenEmails.has(row.emailAddress));
+      const key = dupKey(row.name, row.country);
+      const inDb = existing.has(key);
+      const inFile = seen.has(key);
 
-      if (dupDb || dupFile) {
-        const byName = existingNames.has(row.nameKey) || seenNames.has(row.nameKey);
+      if (inDb || inFile) {
         duplicates.push({
           name: row.name,
+          country: row.country || '',
           emailAddress: row.emailAddress || '',
-          reason: `${dupDb ? 'Already exists in database' : 'Duplicate row in uploaded Excel'} (${
-            byName ? 'company name' : 'email address'
-          })`,
+          reason: `${
+            inDb ? 'Already exists in database' : 'Duplicate row in uploaded Excel'
+          } (same company name and country)`,
         });
         continue;
       }
 
       uniqueRows.push(row);
-      seenNames.add(row.nameKey);
-      if (row.emailAddress) seenEmails.add(row.emailAddress);
+      seen.add(key);
     }
 
     updateJob(job, { stage: 'Saving rows', percent: 30, processed: 0, total: uniqueRows.length });
@@ -263,39 +234,38 @@ async function runImportJob(job, { buffer, uploader, io }) {
       updateJob(job, {
         processed: done,
         percent: scale(30, 99, done, uniqueRows.length),
-      })
+      }),
     );
 
-updateJob(job, {
-  state: 'done',
-  percent: 100,
-  processed: uniqueRows.length,
-  result: {
-    message: 'Company Excel import completed.',
-    importBatchId,
-    uploadedBy: uploader.id,
-    uploadedByName: uploader.name,
-    totalRows: parsed.length,
-    importedCount: inserted,
-    failedCount: uniqueRows.length - inserted,
-    invalidCount: invalid.length,
-    duplicateCount: duplicates.length,
-    duplicates: duplicates.slice(0, 500),
-    ...(errors.length && { errors: errors.slice(0, 5) }),
-  },
-});
+    updateJob(job, {
+      state: 'done',
+      percent: 100,
+      processed: uniqueRows.length,
+      result: {
+        message: 'Company Excel import completed.',
+        importBatchId,
+        uploadedBy: uploader.id,
+        uploadedByName: uploader.name,
+        totalRows: parsed.length,
+        importedCount: inserted,
+        failedCount: uniqueRows.length - inserted,
+        invalidCount,
+        duplicateCount: duplicates.length,
+        duplicates: duplicates.slice(0, 500),
+        ...(errors.length && { errors: errors.slice(0, 5) }),
+      },
+    });
 
-await emitImportCompleted(io, {
-  type: 'company',
-  uploaderName: uploader.name || 'Unknown user',
-  totalImported: inserted,
-  companyCount: inserted,
-  status: 'success',
-  message: `${uploader.name || 'A user'} imported ${inserted} companies`,
-});
+    await emitImportCompleted(io, {
+      type: 'company',
+      uploaderName: uploader.name || 'Unknown user',
+      totalImported: inserted,
+      companyCount: inserted,
+      status: 'success',
+      message: `${uploader.name || 'A user'} imported ${inserted} companies`,
+    });
 
-return job;
-
+    return job;
   } catch (err) {
     return updateJob(job, { state: 'failed', error: err.message || 'Import failed.' });
   }
@@ -337,13 +307,8 @@ export async function importCompaniesExcel(req, res, next) {
     res.status(202).json({ jobId: job.id });
 
     // Not awaited on purpose: the response is already sent.
-const io = req.app.get('io');
-
-runImportJob(job, {
-  buffer: req.file.buffer,
-  uploader,
-  io,
-});
+    const io = req.app.get('io');
+    runImportJob(job, { buffer: req.file.buffer, uploader, io });
   } catch (error) {
     next(error);
   }

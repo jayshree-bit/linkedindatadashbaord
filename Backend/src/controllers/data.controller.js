@@ -674,7 +674,7 @@ async function runImportJob(
       employeeCode: p.employeeCode || uploader.code,
       status: selectedStatus,
       uploadedBy: uploader.id,
-      uploadedByName: uploader.label,
+      uploadedByName: uploader.name,
       importBatchId,
       emailAddress: normalizeEmail(p.emailAddress),
       linkedinProfileLink: normalizeLinkedIn(p.linkedinProfileLink),
@@ -854,6 +854,10 @@ export async function importProspectsExcel(req, res, next) {
       return res
         .status(401)
         .json({ message: "Could not identify the uploading user." });
+    }
+    if (!uploader.name) {
+      const u = await User.findById(uploader.id).select("name email").lean();
+      uploader.name = u?.name || u?.email || "";
     }
     const sentUploadedBy = String(req.body.uploadedBy || "").trim();
     if (sentUploadedBy && sentUploadedBy !== String(uploader.id)) {
