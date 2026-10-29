@@ -43,7 +43,6 @@ r.get(
   getDashboard
 );
 
-
 const excelUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 },
@@ -54,6 +53,8 @@ const excelUpload = multer({
     cb(null, true);
   },
 });
+r.post('/data/prospect/company-list', excelUpload.single('file'), data.uploadCompanyList);
+r.get('/prospect/company-list/sample', data.companyListSample);
 
 r.post(
   "/data/prospect/import-excel",

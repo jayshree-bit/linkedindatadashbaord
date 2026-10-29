@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import Prospect from '../models/Prospect.js';
 import Company from '../models/Company.js';
 import User from '../models/User.js';
+import { companyLists } from '../controllers/data.controller.js';
 const models = {
   prospect: Prospect,
   company: Company,
@@ -94,6 +95,38 @@ const userScopeCondition = (model) => {
   return { uploadedBy: new mongoose.Types.ObjectId(id) };
 };
 
+/* Special filter key `companyListId` (prospects only): match uploaded domains / names. */
+const COMPANY_LIST_FIELDS = {
+  prospect: { domainFields: ['companyDomain'], nameField: 'companyName' },
+  company: { domainFields: ['domain', 'website'], nameField: 'name' },
+};
+
+const companyListCondition = (resource, model) => {
+  const id = typeof model === 'string' ? model : model?.text;
+  const list = companyLists.get(id);
+  const cfg = COMPANY_LIST_FIELDS[resource];
+
+  // Unknown or expired list matches nothing, never everything.
+  if (!list || !cfg) return { _id: { $exists: false } };
+
+  const or = [];
+
+  if (list.domains.length) {
+    const alt = list.domains.map(escapeRegex).join('|');
+    // Stored values may carry http://, www., a trailing slash or a path (website).
+    const domainRegex = new RegExp(`^(https?://)?(www\\.)?(${alt})(/.*)?$`, 'i');
+    for (const f of cfg.domainFields) or.push({ [f]: domainRegex });
+  }
+
+  if (list.names.length) {
+    const alt = list.names.map(escapeRegex).join('|');
+    or.push({ [cfg.nameField]: new RegExp(`^(${alt})$`, 'i') });
+  }
+
+  return or.length ? { $or: or } : { _id: { $exists: false } };
+};
+
+
 const parseFilters = (resource, raw) => {
   if (!raw) return [];
 
@@ -113,6 +146,12 @@ const parseFilters = (resource, raw) => {
     // Locked "employee" filter coming from the dashboard link
     if (resource === 'prospect' && gridKey === 'userId') {
       conditions.push(userScopeCondition(model));
+      continue;
+    }
+
+    // Company list uploaded from Excel (domains / company names)
+   if ((resource === 'prospect' || resource === 'company') && gridKey === 'companyListId') {
+      conditions.push(companyListCondition(resource, model));
       continue;
     }
 
@@ -142,6 +181,7 @@ const buildFilter = (resource, { search = '', filters = '' } = {}) => {
   const filter = {};
 
   const conditions = parseFilters(resource, filters);
+  
   if (conditions.length) filter.$and = conditions;
 
   const searchText = String(search).trim();

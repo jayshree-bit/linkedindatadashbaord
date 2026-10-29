@@ -2,10 +2,14 @@ import axios from 'axios';
 
 // Production: VITE_API_URL=/api (Netlify proxies it to Render, cookie stays first-party)
 // Local dev: falls back to the local backend
+
 const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
+  baseURL:
+    import.meta.env.VITE_API_URL ||
+    "http://192.168.1.142:5000/api",
   withCredentials: true,
 });
+
 
 apiClient.interceptors.response.use(
   (response) => response,

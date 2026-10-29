@@ -913,3 +913,119 @@ export function getImportStatus(req, res) {
   const { id, userId, ...status } = job;
   return res.json(status);
 }
+
+
+/* ====================================================================
+   Company list filter (upload Excel of domains / company names)
+   ==================================================================== */
+const COMPANY_LIST_TTL_MS = 60 * 60 * 1000;
+const MAX_LIST_ITEMS = 5000;
+export const companyLists = new Map(); // id -> { userId, domains, names }
+
+const DOMAIN_HEADERS = ["company domain", "domain", "website", "company website"];
+const NAME_HEADERS = ["company name", "company", "organization", "name"];
+
+const cleanDomain = (v) =>
+  String(v || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/[/?#].*$/, "");
+
+export async function uploadCompanyList(req, res, next) {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "Please upload an Excel file." });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(req.file.buffer);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) return res.status(400).json({ message: "The file is empty." });
+
+    let domainCol = null;
+    let nameCol = null;
+    sheet.getRow(1).eachCell({ includeEmpty: false }, (cell, col) => {
+      const h = normalizeHeader(getExcelValue(cell));
+      if (!domainCol && DOMAIN_HEADERS.includes(h)) domainCol = col;
+      if (!nameCol && NAME_HEADERS.includes(h)) nameCol = col;
+    });
+
+    if (!domainCol && !nameCol) {
+      return res.status(400).json({
+        message: 'Add a "Company Domain" and/or "Company Name" column header.',
+      });
+    }
+
+    const domains = new Set();
+    const names = new Set();
+
+    sheet.eachRow({ includeEmpty: false }, (row, n) => {
+      if (n === 1) return;
+      if (domainCol) {
+        const d = cleanDomain(getExcelValue(row.getCell(domainCol)));
+        if (d) domains.add(d);
+      }
+      if (nameCol) {
+        const nm = String(getExcelValue(row.getCell(nameCol)) || "").trim();
+        if (nm) names.add(nm);
+      }
+    });
+
+    if (domains.size + names.size === 0) {
+      return res.status(400).json({ message: "No company values found." });
+    }
+    if (domains.size > MAX_LIST_ITEMS || names.size > MAX_LIST_ITEMS) {
+      return res.status(400).json({
+        message: `Too many values (max ${MAX_LIST_ITEMS} per column).`,
+      });
+    }
+
+    const id = randomUUID();
+    companyLists.set(id, {
+      userId: String(req.user?._id || req.user?.id || ""),
+      domains: [...domains],
+      names: [...names],
+    });
+    setTimeout(() => companyLists.delete(id), COMPANY_LIST_TTL_MS).unref?.();
+
+    res.json({
+      listId: id,
+      domainCount: domains.size,
+      nameCount: names.size,
+    });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function companyListSample(req, res, next) {
+  try {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Company List");
+
+    sheet.columns = [
+      { header: "Company Domain", key: "domain", width: 32 },
+      { header: "Company Name", key: "name", width: 32 },
+    ];
+    sheet.addRows([
+      ["acme.com", "Acme Inc"],
+      ["globex.com", "Globex Corporation"],
+    ]);
+    sheet.getRow(1).font = { bold: true };
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      'attachment; filename="company-list-sample.xlsx"',
+    );
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (e) {
+    next(e);
+  }
+}

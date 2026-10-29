@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { logoutUser } from '../../features/authSlice';
@@ -10,6 +10,8 @@ import {
   clearAllNotifications,
   addNotification,
 } from '../../features/notificationSlice';
+import { uploadProfilePhoto } from "../../services/profileService";
+
 function getInitialTheme() {
   try {
     const savedTheme = localStorage.getItem('theme');
@@ -34,6 +36,49 @@ export default function Header({ user, onMenuClick }) {
   const [theme, setTheme] = useState(getInitialTheme);
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+const photoInputRef = useRef(null);
+const [photoUploading, setPhotoUploading] = useState(false);
+const [photoError, setPhotoError] = useState("");
+const [uploadedProfilePhoto, setUploadedProfilePhoto] = useState(null);
+const handleProfilePhotoUpload = async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+    setPhotoError("Only JPG, PNG, and WebP images are allowed.");
+    event.target.value = "";
+    return;
+  }
+
+  if (file.size > 5 * 1024 * 1024) {
+    setPhotoError("Image size must be 5 MB or less.");
+    event.target.value = "";
+    return;
+  }
+
+  setPhotoError("");
+  setPhotoUploading(true);
+
+  try {
+    const updatedUser = await uploadProfilePhoto(file);
+console.log("profilephottoss>>>",   updatedUser)
+    // Adapt this to your existing AuthContext or Redux state
+    // if the logged-in user is not managed with local useState.
+  setUploadedProfilePhoto(updatedUser?.profilePhoto || null);
+  } catch (error) {
+    console.error("Profile photo upload failed:", error);
+
+    setPhotoError(
+      error.response?.data?.message ||
+        error.message ||
+        "Failed to upload profile photo."
+    );
+  } finally {
+    setPhotoUploading(false);
+    event.target.value = "";
+  }
+};
+
 
   const {
     items: notifications,
@@ -339,7 +384,17 @@ export default function Header({ user, onMenuClick }) {
             {/* User profile */}
             <div className="flex items-center gap-2">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-sm font-bold text-white shadow-md shadow-indigo-200 dark:shadow-none">
-                {initials}
+              {uploadedProfilePhoto || user?.profilePhoto ? (
+            <img
+              src={`${import.meta.env.VITE_API_URL.replace(/\/api\/?$/, '')}${
+                uploadedProfilePhoto || user?.profilePhoto
+              }`}
+              alt="Profile"
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <span>{initials}</span>
+          )}
               </div>
 
               <button
@@ -375,7 +430,8 @@ export default function Header({ user, onMenuClick }) {
         </div>
       </header>
 
-    {profileOpen && (
+   
+{profileOpen && (
   <div
     className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
     onClick={() => setProfileOpen(false)}
@@ -396,38 +452,101 @@ export default function Header({ user, onMenuClick }) {
           >
             My Profile
           </h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            View your account information
-          </p>
         </div>
 
         <button
           type="button"
           onClick={() => setProfileOpen(false)}
           aria-label="Close profile"
-          className="rounded-lg p-2 text-xl text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700"
+          className="rounded-lg p-2 text-xl text-slate-500 transition hover:bg-slate-200 dark:hover:bg-slate-700"
         >
           &times;
         </button>
       </div>
 
       {/* Profile details */}
-      <div className="p-6">
+      <div className="max-h-[75vh] overflow-y-auto p-6">
+        {/* Profile photo and user name */}
         <div className="mb-6 flex items-center gap-4">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-xl font-bold text-white">
-            {initials}
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => photoInputRef.current?.click()}
+              disabled={photoUploading}
+              aria-label="Upload or change profile photo"
+              className="group relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-xl font-bold text-white ring-2 ring-slate-200 transition hover:ring-indigo-400 disabled:cursor-wait dark:ring-slate-700"
+            >
+        {uploadedProfilePhoto || user?.profilePhoto ? (
+            <img
+              src={`${import.meta.env.VITE_API_URL.replace(/\/api\/?$/, '')}${
+                uploadedProfilePhoto || user?.profilePhoto
+              }`}
+              alt="Profile"
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <span>{initials}</span>
+          )}
+
+              {/* Hover overlay */}
+              <span className="absolute inset-0 flex items-center justify-center bg-black/50 text-xs font-semibold opacity-0 transition group-hover:opacity-100">
+                {photoUploading ? "Uploading..." : "Change"}
+              </span>
+            </button>
+
+            {/* Camera icon */}
+            <span className="pointer-events-none absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-indigo-600 text-white dark:border-slate-900">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                className="h-3.5 w-3.5"
+              >
+                <path d="M14 4h-4L8 7H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2-3Z" />
+                <circle cx="12" cy="13" r="3" />
+              </svg>
+            </span>
+
+            {/* Hidden file input */}
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={handleProfilePhotoUpload}
+              className="hidden"
+              disabled={photoUploading}
+            />
           </div>
 
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h3 className="truncate text-lg font-bold text-slate-900 dark:text-white">
               {user?.name || user?.username || "User"}
             </h3>
+
             <p className="truncate text-sm text-slate-500 dark:text-slate-400">
               {user?.role?.name || "Member"}
             </p>
+
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {photoUploading
+                ? "Uploading profile photo..."
+                : "Click the photo to upload or change"}
+            </p>
+
+            {photoError && (
+              <p
+                role="alert"
+                className="mt-1 text-xs text-red-500"
+              >
+                {photoError}
+              </p>
+            )}
           </div>
         </div>
 
+        {/* Account information */}
         <div className="space-y-4">
           {[
             ["Full Name", user?.name],
@@ -443,6 +562,7 @@ export default function Header({ user, onMenuClick }) {
               <p className="text-sm text-slate-500 dark:text-slate-400">
                 {label}
               </p>
+
               <p className="break-words text-right text-sm font-medium text-slate-800 dark:text-slate-100">
                 {value || "Not provided"}
               </p>
@@ -489,12 +609,11 @@ export default function Header({ user, onMenuClick }) {
             ))}
           </div>
         </div>
-
-       
       </div>
     </div>
   </div>
 )}
+
     </>
   );
 }

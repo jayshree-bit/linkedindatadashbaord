@@ -3,14 +3,15 @@ import User from "../models/User.js";
 import bcrypt from "bcryptjs";
 
 // "lax" works because the Netlify proxy makes the API same-site with the frontend.
+const isProduction = process.env.NODE_ENV === "production";
+
 const cookieOptions = {
   httpOnly: true,
-  secure: true,
-  sameSite: "none",
+  secure: isProduction,
+  sameSite: isProduction ? "none" : "lax",
   path: "/",
   maxAge: 24 * 60 * 60 * 1000,
 };
-
 // clearCookie only works when the options match the ones used to set it
 const { maxAge, ...clearOptions } = cookieOptions;
 

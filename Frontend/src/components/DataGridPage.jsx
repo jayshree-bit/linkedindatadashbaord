@@ -21,10 +21,12 @@ import {
 import { can } from '../features/authSlice';
 import { getDistinctApi, exportRowsApi,  exportStartApi,
   exportStatusApi,
-  exportFileApi, } from '../services/dataService';
+  exportFileApi, uploadCompanyListApi } from '../services/dataService';
 import './DataGridPage.css';
 import ImportExcelModal from './ImportExcelModal';
 import CompanyImportModal from './CompanyImportModal';
+import CompanyListModal from './CompanyListModal';
+
 /* ---------- Filter model helpers ---------- */
 
 const OPERATORS = [
@@ -447,13 +449,20 @@ const [exportBytes, setExportBytes] = useState(0);
   const sortBy = sortColumns[0]?.columnKey ?? '';
   const sortOrder = sortColumns[0]?.direction === 'DESC' ? 'desc' : 'asc';
 const [exportStatus, setExportStatus] = useState('');
+const [companyList, setCompanyList] = useState(null); // { listId, domainCount, nameCount, fileName }
+const [listError, setListError] = useState('');
+const listInputRef = useRef(null);
+const [showListModal, setShowListModal] = useState(false);
   // Column filters typed by the user + locked filters from the URL (locked ones win).
   const fixedKey = JSON.stringify(fixedFilters);
   const effectiveFilters = useMemo(
-    () => ({ ...filters, ...fixedFilters }),
-    // fixedKey is the stable form of fixedFilters
+    () => ({
+      ...filters,
+      ...(companyList ? { companyListId: { op: 'equals', text: companyList.listId } } : {}),
+      ...fixedFilters,
+    }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filters, fixedKey]
+    [filters, fixedKey, companyList]
   );
 
   // Go back to page 1 when the dashboard link (status / employee) changes.
@@ -693,7 +702,20 @@ const exportExcel = async () => {
     setVisibleKeys((current) =>
       current.includes(key) ? current.filter((k) => k !== key) : [...current, key]
     );
+  useEffect(() => { setPage(1); }, [companyList]);
 
+  const onPickCompanyList = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setListError('');
+    try {
+      const res = await uploadCompanyListApi(file);
+      setCompanyList({ ...res, fileName: file.name });
+    } catch (err) {
+      setListError(err?.response?.data?.message || 'Could not read the file.');
+    }
+  };
   // Clears only the user's own filters; the locked URL filters stay.
   const clearAll = () => {
     setFilterModels({});
@@ -709,36 +731,61 @@ const exportExcel = async () => {
 
   return (
     <section className="dgp">
-      <div className="dgp-card dgp-head">
-        <div>
-          <h2 className="dgp-title">{title}</h2>
-          <span className="dgp-badge">{pagination.total.toLocaleString()} total records</span>
-        </div>
+     
+<div className="dgp-card dgp-head">
+  <div>
+    <h2 className="dgp-title">{title}</h2>
+    <span className="dgp-badge">
+      {pagination.total.toLocaleString()} total records
+    </span>
+  </div>
 
-        {resource === 'prospect' && canEdit && (
-          <button
-            type="button"
-            className="dgp-btn dgp-btn-primary"
-            onClick={() => setShowImport(true)}
-          >
-            Import Excel
-          </button>
-          
-        )}
-      {resource === 'company' && canEdit && (
-        <button onClick={() => setImportOpen(true)} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">
-  Import Excel
-</button>
-          
-        )}
+  <div className="flex flex-wrap items-center justify-end gap-3">
+    {resource === 'prospect' && canEdit && (
+      <button
+        type="button"
+        className="dgp-btn dgp-btn-primary"
+        onClick={() => setShowImport(true)}
+      >
+        Import Excel
+      </button>
+    )}
 
-        {showImport && (
-          <ImportExcelModal
-            onClose={() => setShowImport(false)}
-            onImported={onImported}
-          />
-        )}
-      </div>
+    {resource === 'company' && canEdit && (
+      <button
+        type="button"
+        onClick={() => setImportOpen(true)}
+        className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+      >
+        Import Excel
+      </button>
+    )}
+
+      {(resource === 'prospect' || resource === 'company') && (
+      <button
+        type="button"
+        className="dgp-btn"
+        onClick={() => setShowListModal(true)}
+      >
+        Filter by company list
+      </button>
+    )}
+  </div>
+
+  <CompanyListModal
+    open={showListModal}
+    onClose={() => setShowListModal(false)}
+    onApplied={setCompanyList}
+  />
+
+  {showImport && (
+    <ImportExcelModal
+      onClose={() => setShowImport(false)}
+      onImported={onImported}
+    />
+  )}
+</div>
+
 
 <CompanyImportModal
   open={importOpen}
@@ -869,8 +916,17 @@ const exportExcel = async () => {
 
         {error && <div className="dgp-alert">{String(error)}</div>}
 
+
+
         <div className={`dgp-grid ${loading ? 'is-loading' : ''}`}>
   <HeaderCtx.Provider value={headerCtx}>
+    {listError && <div className="dgp-alert">{listError}</div>}
+{companyList && (
+  <div className="dgp-chip">
+    Company list: {companyList.fileName} ({companyList.domainCount} domains, {companyList.nameCount} names)
+    <button type="button" className="dgp-link" onClick={() => setCompanyList(null)}>Clear</button>
+  </div>
+)}
     <DataGrid
       className="rdg-light ag-like"
       columns={columns}

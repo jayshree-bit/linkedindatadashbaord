@@ -12,14 +12,14 @@ import authRoutes from './src/routes/auth.routes.js';
 import privateRoutes from './src/routes/private.routes.js';
 import notificationRoutes from './src/routes/notification.routes.js';
 import compression from 'compression';
-
+import path from "path";
 const app = express();
 const server = createServer(app);
 
 // Exact origins, no trailing slash
 const allowedOrigins = [
   process.env.CLIENT_URL || 'https://prospectdash.netlify.app',
-  'http://localhost:5173', // Vite dev, remove if unused
+  'http://localhost:5173', 'http://192.168.1.142:5173' // Vite dev, remove if unused
 ].map((url) => url.replace(/\/+$/, ''));
 
 app.set('trust proxy', 1);
@@ -42,6 +42,7 @@ app.use(
       req.originalUrl.includes('/export') ? false : compression.filter(req, res),
   })
 );
+
 const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
@@ -68,7 +69,17 @@ app.use('/api/auth', authRoutes);
 // More specific path first
 app.use('/api/private/notifications', notificationRoutes);
 app.use('/api/private', privateRoutes);
-
+app.use(
+  "/uploads/profiles",
+  express.static(path.resolve("uploads/profiles"), {
+    dotfiles: "deny",
+    index: false,
+    setHeaders(res) {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+    },
+  })
+);
 app.use((req, res) =>
   res.status(404).json({ message: 'Route not found' })
 );
@@ -80,11 +91,13 @@ app.use((err, req, res, next) => {
   });
 });
 
+
 await connectDB();
 await seed();
 
 const PORT = process.env.PORT || 5000;
 
-server.listen(PORT, () => {
-  console.log(`API running on port ${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`API running on http://localhost:${PORT}`);
+  console.log(`Network API: http://192.168.1.142:${PORT}`);
 });

@@ -8,6 +8,7 @@ export const publicUser = (u) => ({
   email: u.email,
   username: u.username,
   name: u.name,
+  profilePhoto: u.profilePhoto || null,
   phone: u.phone,
   role: u.role,
 });

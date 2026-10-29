@@ -148,3 +148,18 @@ export const getCompanyImportStatusApi = (jobId) =>
   api
     .get(`/private/data/company/import-excel/${encodeURIComponent(jobId)}`)
     .then((response) => response.data);
+
+
+export const uploadCompanyListApi = async (file) => {
+  const form = new FormData();
+  form.append('file', file);
+  const { data } = await api.post('/private/data/prospect/company-list', form);
+  return data; // { listId, domainCount, nameCount }
+};
+
+export const downloadCompanyListSampleApi = async () => {
+  const { data } = await api.get('/private/data/prospect/company-list/sample', {
+    responseType: 'blob',
+  });
+  return data;
+};
