@@ -4,6 +4,7 @@ import Prospect from "../models/Prospect.js";
 import { randomUUID } from "crypto";
 import User from '../models/User.js';
 import mongoose from 'mongoose';
+import { logUserActivity } from "../services/userActivity.service.js";
 
 import { emitImportCompleted } from '../utils/importNotifications.js';
 /* ====================================================================
@@ -75,83 +76,66 @@ const LIST_LIMIT = 200;
 
 export const getProspectDashboardStats = async (req, res, next) => {
   try {
-    const { userId, includeLists } = req.query;
+    const employeeName = String(req.query.employeeName || '').trim();
+    const includeLists = req.query.includeLists === 'true';
 
-    if (userId && !mongoose.isValidObjectId(userId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid user ID',
-      });
-    }
-
-    // ONE aggregation instead of two: group by uploadedBy (null included).
-    // Global totals are derived from these rows in JS, so Prospect is scanned once.
-    const [countRows, users] = await Promise.all([
-      Prospect.aggregate([
-        {
-          $group: {
-            _id: '$uploadedBy',
-            total: { $sum: 1 },
-            qualified: {
-              $sum: { $cond: [{ $eq: ['$status', 'Qualified'] }, 1, 0] },
-            },
-            disqualified: {
-              $sum: { $cond: [{ $eq: ['$status', 'DisQualified'] }, 1, 0] },
-            },
-          },
+    // One aggregation: group by employeeName (case-insensitive). Blank names are
+    // counted in the global totals only.
+    const rows = await Prospect.aggregate([
+      {
+        $group: {
+          _id: { $toLower: { $trim: { input: { $ifNull: ['$employeeName', ''] } } } },
+          label: { $first: '$employeeName' },
+          total: { $sum: 1 },
+          qualified: { $sum: { $cond: [{ $eq: ['$status', 'Qualified'] }, 1, 0] } },
+          disqualified: { $sum: { $cond: [{ $eq: ['$status', 'DisQualified'] }, 1, 0] } },
         },
-      ]),
-      User.find().select('_id name email').sort({ name: 1 }).lean(),
+      },
     ]);
 
     const global = { ...EMPTY_STATS };
-    const countsByUser = new Map();
+    const employees = [];
 
-    for (const row of countRows) {
+    for (const row of rows) {
       global.total += row.total;
       global.qualified += row.qualified;
       global.disqualified += row.disqualified;
 
-      // Rows without uploadedBy count toward global only
       if (row._id) {
-        countsByUser.set(row._id.toString(), {
-          total: row.total,
-          qualified: row.qualified,
-          disqualified: row.disqualified,
+        employees.push({
+          _id: row.label,            // the employee name is the id used by the UI
+          name: row.label,
+          email: '',
+          stats: {
+            total: row.total,
+            qualified: row.qualified,
+            disqualified: row.disqualified,
+          },
         });
       }
     }
 
-    const userList = users.map((user) => ({
-      _id: user._id,
-      name: user.name || user.email || 'Unnamed user',
-      email: user.email || '',
-      stats: countsByUser.get(user._id.toString()) || { ...EMPTY_STATS },
-    }));
+    employees.sort((a, b) => a.name.localeCompare(b.name));
 
     let selectedUser = null;
     let selectedStats = global;
     let qualifiedList = [];
     let disqualifiedList = [];
 
-    if (userId) {
+    if (employeeName) {
       selectedUser =
-        userList.find((user) => user._id.toString() === userId) || null;
+        employees.find((e) => e.name.toLowerCase() === employeeName.toLowerCase()) || null;
 
       if (!selectedUser) {
-        return res.status(404).json({
-          success: false,
-          message: 'User not found',
-        });
+        return res.status(404).json({ success: false, message: 'Employee not found' });
       }
 
       selectedStats = selectedUser.stats;
 
-      // The dashboard UI only needs counts. Fetch the lists only when asked
-      // (?includeLists=true), capped and without heavy fields.
-      if (includeLists === 'true') {
+      if (includeLists) {
         const listQuery = (status) =>
-          Prospect.find({ uploadedBy: userId, status })
+          Prospect.find({ employeeName: selectedUser.name, status })
+            .collation({ locale: 'en', strength: 2 })   // case-insensitive match
             .sort({ createdAt: -1 })
             .limit(LIST_LIMIT)
             .lean();
@@ -169,7 +153,7 @@ export const getProspectDashboardStats = async (req, res, next) => {
         global,
         selectedUser,
         stats: selectedStats,
-        users: userList,
+        users: employees,      // left side list
         qualifiedList,
         disqualifiedList,
       },
@@ -178,6 +162,7 @@ export const getProspectDashboardStats = async (req, res, next) => {
     next(error);
   }
 };
+
 export const getDashboard = async (req, res, next) => {
   try {
     console.log(" function call")

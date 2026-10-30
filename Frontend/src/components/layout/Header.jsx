@@ -1,31 +1,31 @@
-
-import { useEffect, useState, useRef } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
-import { useNavigate } from 'react-router-dom';
-import { logoutUser } from '../../features/authSlice';
-import { io } from 'socket.io-client';
+import { useEffect, useState, useRef } from "react";
+import { useDispatch, useSelector } from "react-redux";
+import { useNavigate } from "react-router-dom";
+import { logoutUser } from "../../features/authSlice";
+import { io } from "socket.io-client";
 import {
   fetchNotifications,
   markAllNotificationsRead,
   clearAllNotifications,
   addNotification,
-} from '../../features/notificationSlice';
+} from "../../features/notificationSlice";
 import { uploadProfilePhoto } from "../../services/profileService";
-
+import { updateMyProfile } from "../../features/usersSlice";
+import {  profileUpdated } from "../../features/authSlice";
 function getInitialTheme() {
   try {
-    const savedTheme = localStorage.getItem('theme');
+    const savedTheme = localStorage.getItem("theme");
 
-    if (savedTheme === 'dark' || savedTheme === 'light') {
+    if (savedTheme === "dark" || savedTheme === "light") {
       return savedTheme;
     }
   } catch {
     // Fall back to the system preference.
   }
 
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches
-    ? 'dark'
-    : 'light';
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
 }
 
 export default function Header({ user, onMenuClick }) {
@@ -36,49 +36,112 @@ export default function Header({ user, onMenuClick }) {
   const [theme, setTheme] = useState(getInitialTheme);
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-const photoInputRef = useRef(null);
-const [photoUploading, setPhotoUploading] = useState(false);
-const [photoError, setPhotoError] = useState("");
-const [uploadedProfilePhoto, setUploadedProfilePhoto] = useState(null);
-const handleProfilePhotoUpload = async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) return;
+  const photoInputRef = useRef(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState("");
+  const [uploadedProfilePhoto, setUploadedProfilePhoto] = useState(null);
 
-  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-    setPhotoError("Only JPG, PNG, and WebP images are allowed.");
-    event.target.value = "";
+const [editingProfile, setEditingProfile] = useState(false);
+const [profileName, setProfileName] = useState(user?.name || "");
+const [profilePhone, setProfilePhone] = useState(user?.phone || "");
+const [savingProfile, setSavingProfile] = useState(false);
+const [profileSaveError, setProfileSaveError] = useState("");
+const [profileSaveSuccess, setProfileSaveSuccess] = useState("");
+
+const handleEditProfile = () => {
+  setProfileName(user?.name || "");
+  setProfilePhone(user?.phone || "");
+  setProfileSaveError("");
+  setProfileSaveSuccess("");
+  setEditingProfile(true);
+};
+
+const handleCancelProfileEdit = () => {
+  setProfileName(user?.name || "");
+  setProfilePhone(user?.phone || "");
+  setProfileSaveError("");
+  setEditingProfile(false);
+};
+
+const handleSaveProfile = async () => {
+  if (!profileName.trim()) {
+    setProfileSaveError("Full name is required.");
     return;
   }
 
-  if (file.size > 5 * 1024 * 1024) {
-    setPhotoError("Image size must be 5 MB or less.");
-    event.target.value = "";
-    return;
-  }
-
-  setPhotoError("");
-  setPhotoUploading(true);
+  setSavingProfile(true);
+  setProfileSaveError("");
+  setProfileSaveSuccess("");
 
   try {
-    const updatedUser = await uploadProfilePhoto(file);
-console.log("profilephottoss>>>",   updatedUser)
-    // Adapt this to your existing AuthContext or Redux state
-    // if the logged-in user is not managed with local useState.
-  setUploadedProfilePhoto(updatedUser?.profilePhoto || null);
-  } catch (error) {
-    console.error("Profile photo upload failed:", error);
+    console.log("Step 1: Updating profile");
 
-    setPhotoError(
-      error.response?.data?.message ||
-        error.message ||
-        "Failed to upload profile photo."
+    const result = await dispatch(
+      updateMyProfile({
+        name: profileName.trim(),
+        phone: profilePhone.trim(),
+      })
+    ).unwrap();
+
+    console.log("Step 2: Profile updated", result);
+    console.log("Step 3: Refreshing authenticated user");
+
+dispatch(profileUpdated(result.user));
+
+    console.log("Step 4: User refreshed");
+
+    setEditingProfile(false);
+    setProfileSaveSuccess("Profile updated successfully.");
+  } catch (error) {
+    console.error("Profile update failed:", error);
+    setProfileSaveError(
+      typeof error === "string"
+        ? error
+        : error?.message || "Failed to update profile."
     );
   } finally {
-    setPhotoUploading(false);
-    event.target.value = "";
+    setSavingProfile(false);
   }
 };
 
+  const handleProfilePhotoUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setPhotoError("Only JPG, PNG, and WebP images are allowed.");
+      event.target.value = "";
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setPhotoError("Image size must be 5 MB or less.");
+      event.target.value = "";
+      return;
+    }
+
+    setPhotoError("");
+    setPhotoUploading(true);
+
+    try {
+      const updatedUser = await uploadProfilePhoto(file);
+      console.log("profilephottoss>>>", updatedUser);
+      // Adapt this to your existing AuthContext or Redux state
+      // if the logged-in user is not managed with local useState.
+      setUploadedProfilePhoto(updatedUser?.profilePhoto || null);
+    } catch (error) {
+      console.error("Profile photo upload failed:", error);
+
+      setPhotoError(
+        error.response?.data?.message ||
+          error.message ||
+          "Failed to upload profile photo.",
+      );
+    } finally {
+      setPhotoUploading(false);
+      event.target.value = "";
+    }
+  };
 
   const {
     items: notifications,
@@ -89,19 +152,18 @@ console.log("profilephottoss>>>",   updatedUser)
   useEffect(() => {
     dispatch(fetchNotifications());
 
-    const apiUrl =
-      import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+    const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
-    const socket = io(apiUrl.replace(/\/api\/?$/, ''), {
+    const socket = io(apiUrl.replace(/\/api\/?$/, ""), {
       withCredentials: true,
     });
 
-    socket.on('import:notification', (notification) => {
+    socket.on("import:notification", (notification) => {
       dispatch(addNotification(notification));
     });
 
-    socket.on('connect_error', (error) => {
-      console.error('Socket connection failed:', error.message);
+    socket.on("connect_error", (error) => {
+      console.error("Socket connection failed:", error.message);
     });
 
     return () => {
@@ -110,24 +172,19 @@ console.log("profilephottoss>>>",   updatedUser)
   }, [dispatch]);
 
   useEffect(() => {
-    document.documentElement.classList.toggle(
-      'dark',
-      theme === 'dark'
-    );
+    document.documentElement.classList.toggle("dark", theme === "dark");
 
     document.documentElement.style.colorScheme = theme;
 
     try {
-      localStorage.setItem('theme', theme);
+      localStorage.setItem("theme", theme);
     } catch {
       // Theme still works for the current session.
     }
   }, [theme]);
 
   const toggleTheme = () => {
-    setTheme((current) =>
-      current === 'dark' ? 'light' : 'dark'
-    );
+    setTheme((current) => (current === "dark" ? "light" : "dark"));
   };
 
   const handleOpenNotifications = () => {
@@ -154,21 +211,21 @@ console.log("profilephottoss>>>",   updatedUser)
 
     try {
       await dispatch(logoutUser()).unwrap();
-      navigate('/login', { replace: true });
+      navigate("/login", { replace: true });
     } catch (error) {
-      console.error('Logout failed:', error);
+      console.error("Logout failed:", error);
       setLoggingOut(false);
     }
   };
 
-  const initials = (user?.name || user?.email || 'U')
+  const initials = (user?.name || user?.email || "U")
     .split(/\s+/)
     .map((part) => part[0])
-    .join('')
+    .join("")
     .slice(0, 2)
     .toUpperCase();
 
-  const isDark = theme === 'dark';
+  const isDark = theme === "dark";
 
   return (
     <>
@@ -216,17 +273,17 @@ console.log("profilephottoss>>>",   updatedUser)
               type="button"
               onClick={toggleTheme}
               aria-label={
-                isDark ? 'Switch to light mode' : 'Switch to dark mode'
+                isDark ? "Switch to light mode" : "Switch to dark mode"
               }
               aria-pressed={isDark}
-              title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+              title={isDark ? "Switch to light mode" : "Switch to dark mode"}
               className="flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
             >
               <span className="text-lg" aria-hidden="true">
-                {isDark ? '☀️' : '🌙'}
+                {isDark ? "☀️" : "🌙"}
               </span>
               <span className="hidden sm:inline">
-                {isDark ? 'Light' : 'Dark'}
+                {isDark ? "Light" : "Dark"}
               </span>
             </button>
 
@@ -244,7 +301,7 @@ console.log("profilephottoss>>>",   updatedUser)
 
                 {unreadCount > 0 && (
                   <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">
-                    {unreadCount > 99 ? '99+' : unreadCount}
+                    {unreadCount > 99 ? "99+" : unreadCount}
                   </span>
                 )}
               </button>
@@ -293,26 +350,27 @@ console.log("profilephottoss>>>",   updatedUser)
                         >
                           <div className="flex items-start gap-3">
                             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-lg dark:bg-indigo-950">
-                              {item.type === 'company' ? '🏢' : '👥'}
+                              {item.type === "company" ? "🏢" : "👥"}
                             </div>
 
                             <div className="min-w-0 flex-1">
                               <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                                {item.type === 'company'
-                                  ? 'Company import'
-                                  : 'Prospect import'}
+                                {item.type === "company"
+                                  ? "Company import"
+                                  : "Prospect import"}
                               </p>
 
                               <p className="mt-1 break-words text-sm text-slate-600 dark:text-slate-300">
                                 {item.message ||
-                                  `${item.uploaderName || 'A user'} completed an import.`}
+                                  `${item.uploaderName || "A user"} completed an import.`}
                               </p>
 
                               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                                Uploaded by: {item.uploaderName || 'Unknown user'}
+                                Uploaded by:{" "}
+                                {item.uploaderName || "Unknown user"}
                               </p>
 
-                              {item.type === 'prospect' && (
+                              {item.type === "prospect" && (
                                 <div className="mt-2 flex flex-wrap gap-2">
                                   <span className="rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
                                     Qualified: {item.qualifiedCount ?? 0}
@@ -323,29 +381,30 @@ console.log("profilephottoss>>>",   updatedUser)
                                 </div>
                               )}
 
-                              {item.type === 'company' && (
+                              {item.type === "company" && (
                                 <p className="mt-2 text-xs font-medium text-indigo-600 dark:text-indigo-400">
-                                  Companies imported: {item.companyCount ?? item.totalImported ?? 0}
+                                  Companies imported:{" "}
+                                  {item.companyCount ?? item.totalImported ?? 0}
                                 </p>
                               )}
 
                               <p className="mt-2 text-xs text-slate-400">
                                 {item.createdAt
                                   ? new Date(item.createdAt).toLocaleString()
-                                  : 'Just now'}
+                                  : "Just now"}
                               </p>
                             </div>
 
                             <span
                               className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${
-                                item.status === 'success'
-                                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                                  : item.status === 'failed'
-                                    ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
-                                    : 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                                item.status === "success"
+                                  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                                  : item.status === "failed"
+                                    ? "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300"
+                                    : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
                               }`}
                             >
-                              {item.status || 'info'}
+                              {item.status || "info"}
                             </span>
                           </div>
                         </div>
@@ -358,7 +417,7 @@ console.log("profilephottoss>>>",   updatedUser)
                       type="button"
                       onClick={() => {
                         setNotificationsOpen(false);
-                        navigate('/notifications');
+                        navigate("/notifications");
                       }}
                       className="w-full rounded-lg px-3 py-2 text-sm font-semibold text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-slate-800"
                     >
@@ -384,17 +443,17 @@ console.log("profilephottoss>>>",   updatedUser)
             {/* User profile */}
             <div className="flex items-center gap-2">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-sm font-bold text-white shadow-md shadow-indigo-200 dark:shadow-none">
-              {uploadedProfilePhoto || user?.profilePhoto ? (
-            <img
-              src={`${import.meta.env.VITE_API_URL.replace(/\/api\/?$/, '')}${
-                uploadedProfilePhoto || user?.profilePhoto
-              }`}
-              alt="Profile"
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <span>{initials}</span>
-          )}
+                {uploadedProfilePhoto || user?.profilePhoto ? (
+                  <img
+                    src={`${import.meta.env.VITE_API_URL.replace(/\/api\/?$/, "")}${
+                      uploadedProfilePhoto || user?.profilePhoto
+                    }`}
+                    alt="Profile"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <span>{initials}</span>
+                )}
               </div>
 
               <button
@@ -405,10 +464,10 @@ console.log("profilephottoss>>>",   updatedUser)
               >
                 <div className="hidden max-w-32 sm:block">
                   <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
-                    {user?.name || user?.username || 'User'}
+                    {user?.name || user?.username || "User"}
                   </p>
                   <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-                    {user?.role?.name || 'Member'}
+                    {user?.role?.name || "Member"}
                   </p>
                 </div>
               </button>
@@ -422,7 +481,7 @@ console.log("profilephottoss>>>",   updatedUser)
               className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-600 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:border-rose-900 dark:hover:bg-rose-950 dark:hover:text-rose-400"
             >
               <span className="hidden sm:inline">
-                {loggingOut ? 'Signing out...' : 'Log out'}
+                {loggingOut ? "Signing out..." : "Log out"}
               </span>
               <span className="sm:hidden">↪</span>
             </button>
@@ -430,7 +489,7 @@ console.log("profilephottoss>>>",   updatedUser)
         </div>
       </header>
 
-   
+     
 {profileOpen && (
   <div
     className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
@@ -452,11 +511,19 @@ console.log("profilephottoss>>>",   updatedUser)
           >
             My Profile
           </h2>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            View and update your personal information
+          </p>
         </div>
 
         <button
           type="button"
-          onClick={() => setProfileOpen(false)}
+          onClick={() => {
+            setProfileOpen(false);
+            setEditingProfile(false);
+            setProfileSaveError("");
+            setProfileSaveSuccess("");
+          }}
           aria-label="Close profile"
           className="rounded-lg p-2 text-xl text-slate-500 transition hover:bg-slate-200 dark:hover:bg-slate-700"
         >
@@ -476,19 +543,18 @@ console.log("profilephottoss>>>",   updatedUser)
               aria-label="Upload or change profile photo"
               className="group relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-xl font-bold text-white ring-2 ring-slate-200 transition hover:ring-indigo-400 disabled:cursor-wait dark:ring-slate-700"
             >
-        {uploadedProfilePhoto || user?.profilePhoto ? (
-            <img
-              src={`${import.meta.env.VITE_API_URL.replace(/\/api\/?$/, '')}${
-                uploadedProfilePhoto || user?.profilePhoto
-              }`}
-              alt="Profile"
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <span>{initials}</span>
-          )}
+              {uploadedProfilePhoto || user?.profilePhoto ? (
+                <img
+                  src={`${import.meta.env.VITE_API_URL.replace(/\/api\/?$/, "")}${
+                    uploadedProfilePhoto || user?.profilePhoto
+                  }`}
+                  alt="Profile"
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <span>{initials}</span>
+              )}
 
-              {/* Hover overlay */}
               <span className="absolute inset-0 flex items-center justify-center bg-black/50 text-xs font-semibold opacity-0 transition group-hover:opacity-100">
                 {photoUploading ? "Uploading..." : "Change"}
               </span>
@@ -536,38 +602,140 @@ console.log("profilephottoss>>>",   updatedUser)
             </p>
 
             {photoError && (
-              <p
-                role="alert"
-                className="mt-1 text-xs text-red-500"
-              >
+              <p role="alert" className="mt-1 text-xs text-red-500">
                 {photoError}
               </p>
             )}
           </div>
         </div>
 
+        {/* Save feedback */}
+        {profileSaveError && (
+          <div
+            role="alert"
+            className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300"
+          >
+            {profileSaveError}
+          </div>
+        )}
+
+        {profileSaveSuccess && (
+          <div
+            role="status"
+            className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300"
+          >
+            {profileSaveSuccess}
+          </div>
+        )}
+
         {/* Account information */}
         <div className="space-y-4">
-          {[
-            ["Full Name", user?.name],
-            ["Username", user?.username],
-            ["Email Address", user?.email],
-            ["Phone Number", user?.phone],
-            ["Role", user?.role?.name],
-          ].map(([label, value]) => (
-            <div
-              key={label}
-              className="grid grid-cols-[120px_minmax(0,1fr)] gap-3 border-b border-slate-100 pb-3 last:border-0 dark:border-slate-800"
+          {/* Full Name - editable */}
+          <div>
+            <label
+              htmlFor="profile-full-name"
+              className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-slate-300"
             >
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                {label}
-              </p>
+              Full Name <span className="text-red-500">*</span>
+            </label>
 
-              <p className="break-words text-right text-sm font-medium text-slate-800 dark:text-slate-100">
-                {value || "Not provided"}
-              </p>
-            </div>
-          ))}
+            <input
+              id="profile-full-name"
+              type="text"
+              value={editingProfile ? profileName : user?.name || ""}
+              onChange={(e) => setProfileName(e.target.value)}
+              readOnly={!editingProfile}
+              required
+              maxLength={100}
+              autoComplete="name"
+              placeholder="Enter your full name"
+              className={`w-full rounded-lg border px-3 py-2.5 text-sm text-slate-800 outline-none transition dark:text-slate-100 ${
+                editingProfile
+                  ? "border-indigo-300 bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-600 dark:bg-slate-800 dark:focus:ring-indigo-950"
+                  : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/60"
+              }`}
+            />
+          </div>
+
+          {/* Username - read only */}
+          <div>
+            <label
+              htmlFor="profile-username"
+              className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-slate-300"
+            >
+              Username
+            </label>
+
+            <input
+              id="profile-username"
+              type="text"
+              value={user?.username || ""}
+              readOnly
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400"
+            />
+          </div>
+
+          {/* Email - read only */}
+          <div>
+            <label
+              htmlFor="profile-email"
+              className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-slate-300"
+            >
+              Email Address
+            </label>
+
+            <input
+              id="profile-email"
+              type="email"
+              value={user?.email || ""}
+              readOnly
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400"
+            />
+          </div>
+
+          {/* Phone Number - editable */}
+          <div>
+            <label
+              htmlFor="profile-phone"
+              className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-slate-300"
+            >
+              Phone Number
+            </label>
+
+            <input
+              id="profile-phone"
+              type="tel"
+              value={editingProfile ? profilePhone : user?.phone || ""}
+              onChange={(e) => setProfilePhone(e.target.value)}
+              readOnly={!editingProfile}
+              maxLength={20}
+              autoComplete="tel"
+              placeholder="Enter your phone number"
+              className={`w-full rounded-lg border px-3 py-2.5 text-sm text-slate-800 outline-none transition dark:text-slate-100 ${
+                editingProfile
+                  ? "border-indigo-300 bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-600 dark:bg-slate-800 dark:focus:ring-indigo-950"
+                  : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/60"
+              }`}
+            />
+          </div>
+
+          {/* Role - read only */}
+          <div>
+            <label
+              htmlFor="profile-role"
+              className="mb-1.5 block text-sm font-medium text-slate-600 dark:text-slate-300"
+            >
+              Role
+            </label>
+
+            <input
+              id="profile-role"
+              type="text"
+              value={user?.role?.name || ""}
+              readOnly
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400"
+            />
+          </div>
         </div>
 
         {/* Role permissions */}
@@ -608,6 +776,39 @@ console.log("profilephottoss>>>",   updatedUser)
               </div>
             ))}
           </div>
+        </div>
+
+        {/* Action buttons */}
+        <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-5 dark:border-slate-700">
+          {editingProfile ? (
+            <>
+              <button
+                type="button"
+                onClick={handleCancelProfileEdit}
+                disabled={savingProfile}
+                className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSaveProfile}
+                disabled={savingProfile || !profileName.trim()}
+                className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {savingProfile ? "Saving..." : "Save Profile"}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={handleEditProfile}
+              className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+            >
+              Edit Profile
+            </button>
+          )}
         </div>
       </div>
     </div>

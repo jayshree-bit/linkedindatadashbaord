@@ -11,3 +11,5 @@ export const updateRoleApi = (id, permissions) =>
   api.put(`/private/roles/${id}`, { permissions }).then((r) => r.data);
 export const changePasswordApi = (body) =>
   api.put("/auth/change-password", body).then((r) => r.data);
+export const updateMyProfileApi = (body) =>
+  api.put("/private/users/me/profile", body).then((r) => r.data);

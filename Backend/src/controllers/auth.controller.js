@@ -1,7 +1,7 @@
 import * as auth from "../services/auth.service.js";
 import User from "../models/User.js";
 import bcrypt from "bcryptjs";
-
+import { logUserActivity } from "../services/userActivity.service.js";
 // "lax" works because the Netlify proxy makes the API same-site with the frontend.
 const isProduction = process.env.NODE_ENV === "production";
 
@@ -18,10 +18,16 @@ const { maxAge, ...clearOptions } = cookieOptions;
 export const login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
-
     const result = await auth.login(email, password);
 
     res.cookie("token", result.token, cookieOptions);
+
+    await logUserActivity(req, {
+      userId: result.user._id,
+      action: "LOGIN",
+      description: "User logged in successfully",
+      resource: "auth",
+    });
 
     return res.status(200).json({
       user: result.user,

@@ -6,60 +6,67 @@ import {
   useMemo,
   useRef,
   useState,
-} from 'react';
-import { createPortal } from 'react-dom';
-import DataGrid, { textEditor } from 'react-data-grid';
-import 'react-data-grid/lib/styles.css';
-import { useDispatch, useSelector } from 'react-redux';
+} from "react";
+import { createPortal } from "react-dom";
+import DataGrid, { textEditor, SelectColumn } from "react-data-grid";
+import "react-data-grid/lib/styles.css";
+import { useDispatch, useSelector } from "react-redux";
 import {
   fetchRows,
   addRow,
   updateRow,
   deleteRow,
   patchLocal,
-} from '../features/dataSlice';
-import { can } from '../features/authSlice';
-import { getDistinctApi, exportRowsApi,  exportStartApi,
+} from "../features/dataSlice";
+import { can } from "../features/authSlice";
+import {
+  getDistinctApi,
+  exportRowsApi,
+  exportStartApi,
   exportStatusApi,
-  exportFileApi, uploadCompanyListApi } from '../services/dataService';
-import './DataGridPage.css';
-import ImportExcelModal from './ImportExcelModal';
-import CompanyImportModal from './CompanyImportModal';
-import CompanyListModal from './CompanyListModal';
+  exportFileApi,
+  uploadCompanyListApi,
+  updateLinkedinProfilesApi,
+} from "../services/dataService";
+import "./DataGridPage.css";
+import ImportExcelModal from "./ImportExcelModal";
+import CompanyImportModal from "./CompanyImportModal";
+import CompanyListModal from "./CompanyListModal";
 
 /* ---------- Filter model helpers ---------- */
 
 const OPERATORS = [
-  { id: 'contains', label: 'Contains', text: true },
-  { id: 'notContains', label: 'Does not contain', text: true },
-  { id: 'equals', label: 'Equals', text: true },
-  { id: 'notEqual', label: 'Does not equal', text: true },
-  { id: 'startsWith', label: 'Begins with', text: true },
-  { id: 'endsWith', label: 'Ends with', text: true },
-  { id: 'blank', label: 'Blank', text: false },
-  { id: 'notBlank', label: 'Not blank', text: false },
+  { id: "contains", label: "Contains", text: true },
+  { id: "notContains", label: "Does not contain", text: true },
+  { id: "equals", label: "Equals", text: true },
+  { id: "notEqual", label: "Does not equal", text: true },
+  { id: "startsWith", label: "Begins with", text: true },
+  { id: "endsWith", label: "Ends with", text: true },
+  { id: "blank", label: "Blank", text: false },
+  { id: "notBlank", label: "Not blank", text: false },
 ];
 
 const needsText = (op) => OPERATORS.find((o) => o.id === op)?.text ?? true;
-const isBlankValue = (v) => v === null || v === undefined || v === '';
+const isBlankValue = (v) => v === null || v === undefined || v === "";
 const sameValue = (a, b) => (isBlankValue(a) && isBlankValue(b)) || a === b;
-const labelOf = (v) => (isBlankValue(v) ? '(Blanks)' : String(v));
-const isAdvanced = (m) => Boolean(m) && (m.values != null || (m.op && m.op !== 'contains'));
+const labelOf = (v) => (isBlankValue(v) ? "(Blanks)" : String(v));
+const isAdvanced = (m) =>
+  Boolean(m) && (m.values != null || (m.op && m.op !== "contains"));
 
 /* ---------- Header (AG Grid style: title + sort icon + menu, then filter box) ---------- */
 
 const HeaderCtx = createContext(null);
-const COLUMN_DRAG_TYPE = 'text/x-dgp-column';
+const COLUMN_DRAG_TYPE = "text/x-dgp-column";
 
 const stopKeys = (e) => {
-  if (e.key !== 'Tab') e.stopPropagation();
+  if (e.key !== "Tab") e.stopPropagation();
 };
 
 function SortIcon({ direction }) {
   return (
     <span className="agh-sort" aria-hidden="true">
-      <span className={`agh-up ${direction === 'ASC' ? 'on' : ''}`} />
-      <span className={`agh-down ${direction === 'DESC' ? 'on' : ''}`} />
+      <span className={`agh-up ${direction === "ASC" ? "on" : ""}`} />
+      <span className={`agh-down ${direction === "DESC" ? "on" : ""}`} />
     </span>
   );
 }
@@ -67,7 +74,13 @@ function SortIcon({ direction }) {
 function FilterIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-      <path d="M1 3h12M3 7h8M5 11h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" />
+      <path
+        d="M1 3h12M3 7h8M5 11h4"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        fill="none"
+      />
     </svg>
   );
 }
@@ -76,29 +89,47 @@ function FilterIcon() {
 function FilterPopup({ columnKey, anchor, onClose }) {
   const { filterModels, setFilterModel, fetchDistinct } = useContext(HeaderCtx);
   const model = filterModels[columnKey] ?? {};
-  const op = model.op ?? 'contains';
+  const op = model.op ?? "contains";
   const values = model.values ?? null;
 
   const [opOpen, setOpOpen] = useState(false);
-  const [q, setQ] = useState('');
-  const [list, setList] = useState({ items: [], hasMore: false, loading: true, error: '' });
+  const [q, setQ] = useState("");
+  const [list, setList] = useState({
+    items: [],
+    hasMore: false,
+    loading: true,
+    error: "",
+  });
 
   useEffect(() => {
     let cancelled = false;
-    setList((current) => ({ ...current, loading: true, error: '' }));
+    setList((current) => ({ ...current, loading: true, error: "" }));
 
-    const timer = setTimeout(async () => {
-      try {
-        const res = await fetchDistinct(columnKey, q);
-        if (!cancelled) {
-          setList({ items: res?.values ?? [], hasMore: Boolean(res?.hasMore), loading: false, error: '' });
+    const timer = setTimeout(
+      async () => {
+        try {
+          const res = await fetchDistinct(columnKey, q);
+          if (!cancelled) {
+            setList({
+              items: res?.values ?? [],
+              hasMore: Boolean(res?.hasMore),
+              loading: false,
+              error: "",
+            });
+          }
+        } catch {
+          if (!cancelled) {
+            setList({
+              items: [],
+              hasMore: false,
+              loading: false,
+              error: "Could not load values.",
+            });
+          }
         }
-      } catch {
-        if (!cancelled) {
-          setList({ items: [], hasMore: false, loading: false, error: 'Could not load values.' });
-        }
-      }
-    }, q ? 300 : 0);
+      },
+      q ? 300 : 0,
+    );
 
     return () => {
       cancelled = true;
@@ -110,11 +141,13 @@ function FilterPopup({ columnKey, anchor, onClose }) {
   const complete = !hasMore && !q; // the list is every value in the column
 
   // No values filter + complete list = everything is ticked.
-  const isChecked = (v) => (values ? values.some((x) => sameValue(x, v)) : !hasMore);
+  const isChecked = (v) =>
+    values ? values.some((x) => sameValue(x, v)) : !hasMore;
   const allChecked = items.length > 0 && items.every(isChecked);
 
   const commit = (next) => {
-    const normalized = complete && next && next.length === items.length ? null : next;
+    const normalized =
+      complete && next && next.length === items.length ? null : next;
     setFilterModel(columnKey, { values: normalized });
   };
 
@@ -136,7 +169,7 @@ function FilterPopup({ columnKey, anchor, onClose }) {
     }
   };
 
-  const opLabel = OPERATORS.find((o) => o.id === op)?.label ?? 'Contains';
+  const opLabel = OPERATORS.find((o) => o.id === op)?.label ?? "Contains";
 
   return createPortal(
     <>
@@ -147,9 +180,15 @@ function FilterPopup({ columnKey, anchor, onClose }) {
         onKeyDown={stopKeys}
         onClick={(e) => e.stopPropagation()}
       >
-        <button type="button" className="agf-op" onClick={() => setOpOpen((o) => !o)}>
-          <span>Text Filter <em>{opLabel}</em></span>
-          <span>{opOpen ? '⌄' : '›'}</span>
+        <button
+          type="button"
+          className="agf-op"
+          onClick={() => setOpOpen((o) => !o)}
+        >
+          <span>
+            Text Filter <em>{opLabel}</em>
+          </span>
+          <span>{opOpen ? "⌄" : "›"}</span>
         </button>
 
         {opOpen && (
@@ -158,7 +197,7 @@ function FilterPopup({ columnKey, anchor, onClose }) {
               <button
                 key={o.id}
                 type="button"
-                className={`agf-opt ${op === o.id ? 'on' : ''}`}
+                className={`agf-opt ${op === o.id ? "on" : ""}`}
                 onClick={() => {
                   setFilterModel(columnKey, { op: o.id });
                   setOpOpen(false);
@@ -190,42 +229,72 @@ function FilterPopup({ columnKey, anchor, onClose }) {
 
           {items.length > 0 && (
             <label className="agf-item">
-              <input type="checkbox" checked={allChecked} onChange={toggleAll} />
-              <span>{q ? '(Select all results)' : '(Select all)'}</span>
+              <input
+                type="checkbox"
+                checked={allChecked}
+                onChange={toggleAll}
+              />
+              <span>{q ? "(Select all results)" : "(Select all)"}</span>
             </label>
           )}
 
           {items.map((v) => (
-            <label key={isBlankValue(v) ? '__blank' : `${typeof v}:${v}`} className="agf-item">
-              <input type="checkbox" checked={isChecked(v)} onChange={() => toggle(v)} />
+            <label
+              key={isBlankValue(v) ? "__blank" : `${typeof v}:${v}`}
+              className="agf-item"
+            >
+              <input
+                type="checkbox"
+                checked={isChecked(v)}
+                onChange={() => toggle(v)}
+              />
               <span>{labelOf(v)}</span>
             </label>
           ))}
 
           {hasMore && (
-            <div className="agf-note">Showing the first {items.length} values. Search to narrow the list.</div>
+            <div className="agf-note">
+              Showing the first {items.length} values. Search to narrow the
+              list.
+            </div>
           )}
         </div>
 
         <div className="agf-foot">
-          <button type="button" className="agf-clear" onClick={() => { setFilterModel(columnKey, null); setQ(''); }}>
+          <button
+            type="button"
+            className="agf-clear"
+            onClick={() => {
+              setFilterModel(columnKey, null);
+              setQ("");
+            }}
+          >
             Clear filter
           </button>
-          <button type="button" className="agf-done" onClick={onClose}>Done</button>
+          <button type="button" className="agf-done" onClick={onClose}>
+            Done
+          </button>
         </div>
       </div>
     </>,
-    document.body
+    document.body,
   );
 }
 
 function HeaderCell({ column }) {
-  const { sortColumns, setSort, filterModels, setFilterModel, hideColumn, moveColumn } =
-    useContext(HeaderCtx);
+  const {
+    sortColumns,
+    setSort,
+    filterModels,
+    setFilterModel,
+    hideColumn,
+    moveColumn,
+  } = useContext(HeaderCtx);
   const key = column.key;
   const model = filterModels[key] ?? {};
-  const op = model.op ?? 'contains';
-  const direction = sortColumns[0]?.columnKey === key ? sortColumns[0].direction : null;
+  const op = model.op ?? "contains";
+  const direction =
+    sortColumns[0]?.columnKey === key ? sortColumns[0].direction : null;
 
   const [menu, setMenu] = useState(null);
   const [popup, setPopup] = useState(null);
@@ -234,7 +303,10 @@ function HeaderCell({ column }) {
   const filterBtnRef = useRef(null);
 
   const cycleSort = () =>
-    setSort(key, direction === null ? 'ASC' : direction === 'ASC' ? 'DESC' : null);
+    setSort(
+      key,
+      direction === null ? "ASC" : direction === "ASC" ? "DESC" : null,
+    );
 
   const openMenu = (e) => {
     e.stopPropagation();
@@ -261,16 +333,17 @@ function HeaderCell({ column }) {
 
   /* Column reordering (HTML5 drag & drop): drag the grip, drop on another header */
   const onGripDragStart = (e) => {
-    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData(COLUMN_DRAG_TYPE, key);
-    const cell = e.currentTarget.closest('.rdg-cell');
+    const cell = e.currentTarget.closest(".rdg-cell");
     if (cell) e.dataTransfer.setDragImage(cell, 24, 20);
   };
-  const isColumnDrag = (e) => Array.from(e.dataTransfer.types).includes(COLUMN_DRAG_TYPE);
+  const isColumnDrag = (e) =>
+    Array.from(e.dataTransfer.types).includes(COLUMN_DRAG_TYPE);
   const onDragOver = (e) => {
     if (!isColumnDrag(e)) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    e.dataTransfer.dropEffect = "move";
     if (!dragOver) setDragOver(true);
   };
   const onDragLeave = (e) => {
@@ -286,7 +359,7 @@ function HeaderCell({ column }) {
 
   return (
     <div
-      className={`agh ${dragOver ? 'agh-drop' : ''}`}
+      className={`agh ${dragOver ? "agh-drop" : ""}`}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
@@ -302,7 +375,12 @@ function HeaderCell({ column }) {
         >
           ⠿
         </span>
-        <button type="button" className="agh-title" onClick={cycleSort} title={column.name}>
+        <button
+          type="button"
+          className="agh-title"
+          onClick={cycleSort}
+          title={column.name}
+        >
           <span className="agh-name">{column.name}</span>
           <SortIcon direction={direction} />
         </button>
@@ -320,18 +398,22 @@ function HeaderCell({ column }) {
       <div className="agh-filter">
         <input
           type="text"
-          value={textEnabled ? model.text ?? '' : ''}
+          value={textEnabled ? (model.text ?? "") : ""}
           disabled={!textEnabled}
           onChange={(e) => setFilterModel(key, { text: e.target.value })}
           onKeyDown={stopKeys}
           onClick={(e) => e.stopPropagation()}
-          placeholder={textEnabled ? 'Filter...' : OPERATORS.find((o) => o.id === op)?.label}
+          placeholder={
+            textEnabled
+              ? "Filter..."
+              : OPERATORS.find((o) => o.id === op)?.label
+          }
           aria-label={`Filter ${column.name}`}
         />
         <button
           type="button"
           ref={filterBtnRef}
-          className={`agh-filter-btn ${isAdvanced(model) ? 'on' : ''}`}
+          className={`agh-filter-btn ${isAdvanced(model) ? "on" : ""}`}
           aria-label={`${column.name} filter options`}
           onClick={openPopup}
         >
@@ -339,16 +421,42 @@ function HeaderCell({ column }) {
         </button>
       </div>
 
-      {popup && <FilterPopup columnKey={key} anchor={popup} onClose={() => setPopup(null)} />}
+      {popup && (
+        <FilterPopup
+          columnKey={key}
+          anchor={popup}
+          onClose={() => setPopup(null)}
+        />
+      )}
 
       {menu &&
         createPortal(
           <>
             <div className="agm-backdrop" onClick={close} />
-            <div className="agm-menu" style={{ top: menu.top, left: menu.left }}>
-              <button type="button" className="agm-item" onClick={pick(() => setSort(key, 'ASC'))}>Sort ascending</button>
-              <button type="button" className="agm-item" onClick={pick(() => setSort(key, 'DESC'))}>Sort descending</button>
-              <button type="button" className="agm-item" disabled={!direction} onClick={pick(() => setSort(key, null))}>
+            <div
+              className="agm-menu"
+              style={{ top: menu.top, left: menu.left }}
+            >
+              <button
+                type="button"
+                className="agm-item"
+                onClick={pick(() => setSort(key, "ASC"))}
+              >
+                Sort ascending
+              </button>
+              <button
+                type="button"
+                className="agm-item"
+                onClick={pick(() => setSort(key, "DESC"))}
+              >
+                Sort descending
+              </button>
+              <button
+                type="button"
+                className="agm-item"
+                disabled={!direction}
+                onClick={pick(() => setSort(key, null))}
+              >
                 Clear sort
               </button>
               <hr />
@@ -360,10 +468,16 @@ function HeaderCell({ column }) {
               >
                 Clear filter
               </button>
-              <button type="button" className="agm-item" onClick={pick(() => hideColumn(key))}>Hide column</button>
+              <button
+                type="button"
+                className="agm-item"
+                onClick={pick(() => hideColumn(key))}
+              >
+                Hide column
+              </button>
             </div>
           </>,
-          document.body
+          document.body,
         )}
     </div>
   );
@@ -372,21 +486,21 @@ function HeaderCell({ column }) {
 /* ---------- Cell renderers ---------- */
 
 const STATUS_COLORS = {
-  approved: 'success',
-  accepted: 'success',
-  valid: 'success',
-  rejected: 'danger',
-  invalid: 'danger',
-  pending: 'warning',
-  review: 'warning',
+  approved: "success",
+  accepted: "success",
+  valid: "success",
+  rejected: "danger",
+  invalid: "danger",
+  pending: "warning",
+  review: "warning",
 };
 
 const renderFor = (key) => {
-  if (key === 'Status' || key === 'EBB Status') {
+  if (key === "Status" || key === "EBB Status") {
     return ({ row }) => {
       const value = row[key];
       if (!value) return null;
-      const color = STATUS_COLORS[String(value).toLowerCase()] ?? 'secondary';
+      const color = STATUS_COLORS[String(value).toLowerCase()] ?? "secondary";
       return <span className={`dgp-pill dgp-pill-${color}`}>{value}</span>;
     };
   }
@@ -399,7 +513,11 @@ const renderFor = (key) => {
       const value = row[key];
       if (!value) return null;
       const href = /^https?:/i.test(value) ? value : `https://${value}`;
-      return <a href={href} target="_blank" rel="noreferrer">{value}</a>;
+      return (
+        <a href={href} target="_blank" rel="noreferrer">
+          {value}
+        </a>
+      );
     };
   }
   return undefined;
@@ -430,10 +548,10 @@ export default function DataGridPage({
   };
   const loading = dataState.loading;
   const error = dataState.error;
-  const canEdit = can(user, resource, 'edit');
+  const canEdit = can(user, resource, "edit");
 
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
   const [sortColumns, setSortColumns] = useState([]);
@@ -442,27 +560,38 @@ export default function DataGridPage({
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [showImport, setShowImport] = useState(false);
-  const [visibleKeys, setVisibleKeys] = useState(() => fields.map((f) => f.key));
-  const [columnOrder, setColumnOrder] = useState(() => fields.map((f) => f.key));
-const [importOpen, setImportOpen] = useState(false);
-const [exportBytes, setExportBytes] = useState(0);
-  const sortBy = sortColumns[0]?.columnKey ?? '';
-  const sortOrder = sortColumns[0]?.direction === 'DESC' ? 'desc' : 'asc';
-const [exportStatus, setExportStatus] = useState('');
-const [companyList, setCompanyList] = useState(null); // { listId, domainCount, nameCount, fileName }
-const [listError, setListError] = useState('');
-const listInputRef = useRef(null);
-const [showListModal, setShowListModal] = useState(false);
+  const [visibleKeys, setVisibleKeys] = useState(() =>
+    fields.map((f) => f.key),
+  );
+  const [columnOrder, setColumnOrder] = useState(() =>
+    fields.map((f) => f.key),
+  );
+  const [importOpen, setImportOpen] = useState(false);
+  const [exportBytes, setExportBytes] = useState(0);
+  const sortBy = sortColumns[0]?.columnKey ?? "";
+  const sortOrder = sortColumns[0]?.direction === "DESC" ? "desc" : "asc";
+  const [exportStatus, setExportStatus] = useState("");
+  const [companyList, setCompanyList] = useState(null); // { listId, domainCount, nameCount, fileName }
+  const [listError, setListError] = useState("");
+  const listInputRef = useRef(null);
+  const [showListModal, setShowListModal] = useState(false);
+
+  const [selectedRows, setSelectedRows] = useState(() => new Set()); // set of row _id
+
+  const selectedCache = useRef(new Map()); // _id -> full row object
+  const [linkedinBusy, setLinkedinBusy] = useState(false);
   // Column filters typed by the user + locked filters from the URL (locked ones win).
   const fixedKey = JSON.stringify(fixedFilters);
   const effectiveFilters = useMemo(
     () => ({
       ...filters,
-      ...(companyList ? { companyListId: { op: 'equals', text: companyList.listId } } : {}),
+      ...(companyList
+        ? { companyListId: { op: "equals", text: companyList.listId } }
+        : {}),
       ...fixedFilters,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filters, fixedKey, companyList]
+    [filters, fixedKey, companyList],
   );
 
   // Go back to page 1 when the dashboard link (status / employee) changes.
@@ -478,20 +607,24 @@ const [showListModal, setShowListModal] = useState(false);
     }, 350);
     return () => clearTimeout(timer);
   }, [searchInput]);
-
+  useEffect(() => {
+    setSelectedRows(new Set());
+  }, [resource, search, effectiveFilters]);
   // Debounced column filters -> server filter model
   useEffect(() => {
     const timer = setTimeout(() => {
       const next = {};
       for (const [key, m] of Object.entries(filterModels)) {
-        const op = m.op ?? 'contains';
-        const text = needsText(op) ? (m.text ?? '').trim() : '';
+        const op = m.op ?? "contains";
+        const text = needsText(op) ? (m.text ?? "").trim() : "";
         const hasText = needsText(op) ? Boolean(text) : true;
         const hasValues = m.values != null;
         if (!hasText && !hasValues) continue;
         next[key] = { op, text, values: m.values ?? null };
       }
-      setFilters((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+      setFilters((prev) =>
+        JSON.stringify(prev) === JSON.stringify(next) ? prev : next,
+      );
       setPage(1);
     }, 400);
     return () => clearTimeout(timer);
@@ -507,12 +640,21 @@ const [showListModal, setShowListModal] = useState(false);
         sortBy,
         sortOrder,
         filters: effectiveFilters,
-      })
+      }),
     );
-  }, [dispatch, resource, page, limit, search, sortBy, sortOrder, effectiveFilters]);
+  }, [
+    dispatch,
+    resource,
+    page,
+    limit,
+    search,
+    sortBy,
+    sortOrder,
+    effectiveFilters,
+  ]);
 
   // Refs keep fetchDistinct stable so the open filter popup does not refetch on every keystroke.
-  const searchRef = useRef('');
+  const searchRef = useRef("");
   const filtersRef = useRef({});
   searchRef.current = search;
   filtersRef.current = effectiveFilters;
@@ -527,13 +669,15 @@ const [showListModal, setShowListModal] = useState(false);
         valueSearch,
       });
     },
-    [resource]
+    [resource],
   );
 
   // Fields in the user's chosen order (new fields that appear later are appended).
   const orderedFields = useMemo(() => {
     const byKey = new Map(fields.map((f) => [f.key, f]));
-    const ordered = columnOrder.filter((k) => byKey.has(k)).map((k) => byKey.get(k));
+    const ordered = columnOrder
+      .filter((k) => byKey.has(k))
+      .map((k) => byKey.get(k));
     const missing = fields.filter((f) => !columnOrder.includes(f.key));
     return [...ordered, ...missing];
   }, [fields, columnOrder]);
@@ -542,7 +686,10 @@ const [showListModal, setShowListModal] = useState(false);
   const moveColumn = useCallback(
     (sourceKey, targetKey) =>
       setColumnOrder((current) => {
-        const all = [...current, ...fields.map((f) => f.key).filter((k) => !current.includes(k))];
+        const all = [
+          ...current,
+          ...fields.map((f) => f.key).filter((k) => !current.includes(k)),
+        ];
         const from = all.indexOf(sourceKey);
         const to = all.indexOf(targetKey);
         if (from < 0 || to < 0 || from === to) return current;
@@ -551,7 +698,7 @@ const [showListModal, setShowListModal] = useState(false);
         next.splice(to, 0, sourceKey);
         return next;
       }),
-    [fields]
+    [fields],
   );
 
   // Nudge a column one step left (-1) or right (+1) among the visible columns.
@@ -583,21 +730,23 @@ const [showListModal, setShowListModal] = useState(false);
         setVisibleKeys((current) => current.filter((k) => k !== key)),
       moveColumn,
     }),
-    [sortColumns, filterModels, fetchDistinct, moveColumn]
+    [sortColumns, filterModels, fetchDistinct, moveColumn],
   );
 
   const columns = useMemo(() => {
     const offset = (pagination.page - 1) * pagination.limit;
 
     const rowNumber = {
-      key: '__index',
-      name: '#',
+      key: "__index",
+      name: "#",
       width: 64,
       frozen: true,
       resizable: false,
       sortable: false,
       renderHeaderCell: () => <div className="agh agh-index" />,
-      renderCell: ({ rowIdx }) => <span className="text-muted">{offset + rowIdx + 1}</span>,
+      renderCell: ({ rowIdx }) => (
+        <span className="text-muted">{offset + rowIdx + 1}</span>
+      ),
     };
 
     const dataCols = orderedFields
@@ -614,9 +763,54 @@ const [showListModal, setShowListModal] = useState(false);
         renderEditCell: canEdit ? textEditor : undefined,
       }));
 
-    return [rowNumber, ...dataCols];
+    return [SelectColumn, rowNumber, ...dataCols];
   }, [orderedFields, visibleKeys, canEdit, pagination.page, pagination.limit]);
 
+  const clearSelection = useCallback(() => {
+    selectedCache.current.clear();
+    setSelectedRows(new Set());
+  }, []);
+
+  const handleSelectedRowsChange = (next) => {
+    // remember the full row for everything newly ticked on this page
+    rows.forEach((r) => {
+      if (next.has(r._id)) selectedCache.current.set(r._id, r);
+    });
+    // forget anything that was unticked
+    for (const id of Array.from(selectedCache.current.keys())) {
+      if (!next.has(id)) selectedCache.current.delete(id);
+    }
+    setSelectedRows(next);
+  };
+
+  // Full records of the selected rows
+  const getSelectedRecords = () =>
+    Array.from(selectedRows)
+      .map((id) => selectedCache.current.get(id))
+      .filter(Boolean);
+  useEffect(() => {
+    clearSelection();
+  }, [resource, search, effectiveFilters, clearSelection]);
+  const updateLinkedinProfiles = async () => {
+    const records = getSelectedRecords();
+    console.log("selected records >>", records); // full row objects now
+    if (!records.length) return;
+
+    setLinkedinBusy(true);
+    try {
+      await updateLinkedinProfilesApi(resource, records);
+      window.alert(
+        `LinkedIn profile update started for ${records.length} record(s).`,
+      );
+      clearSelection();
+    } catch (err) {
+      window.alert(
+        err?.response?.data?.message || "Could not update LinkedIn profiles.",
+      );
+    } finally {
+      setLinkedinBusy(false);
+    }
+  };
   const onRowsChange = (newRows, { indexes }) => {
     indexes.forEach((index) => {
       const row = newRows[index];
@@ -627,7 +821,7 @@ const [showListModal, setShowListModal] = useState(false);
       const changes = Object.fromEntries(
         fields
           .filter((f) => row[f.key] !== previous[f.key])
-          .map((f) => [f.key, row[f.key]])
+          .map((f) => [f.key, row[f.key]]),
       );
       if (!Object.keys(changes).length) return;
 
@@ -635,49 +829,49 @@ const [showListModal, setShowListModal] = useState(false);
       dispatch(updateRow({ resource, id: row._id, changes }));
     });
   };
-const exportExcel = async () => {
-  setExporting(true);
-  setExportStatus('Preparing export...');
-  try {
-    const exportColumns = orderedFields
-      .filter((f) => visibleKeys.includes(f.key))
-      .map((f) => ({ key: f.key, name: f.name }));
+  const exportExcel = async () => {
+    setExporting(true);
+    setExportStatus("Preparing export...");
+    try {
+      const exportColumns = orderedFields
+        .filter((f) => visibleKeys.includes(f.key))
+        .map((f) => ({ key: f.key, name: f.name }));
 
-    const { jobId } = await exportStartApi(resource, {
-      search,
-      sortBy,
-      sortOrder,
-      filters: effectiveFilters,
-      columns: exportColumns,
-    });
+      const { jobId } = await exportStartApi(resource, {
+        search,
+        sortBy,
+        sortOrder,
+        filters: effectiveFilters,
+        columns: exportColumns,
+      });
 
-    // Poll every second until the file is ready.
-    for (;;) {
-      await new Promise((r) => setTimeout(r, 1000));
-      const s = await exportStatusApi(resource, jobId);
-      if (s.state === 'failed') throw new Error(s.error || 'Export failed');
-      if (s.state === 'done') break;
-      setExportStatus(`Exporting... ${s.processed.toLocaleString()} rows`);
+      // Poll every second until the file is ready.
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const s = await exportStatusApi(resource, jobId);
+        if (s.state === "failed") throw new Error(s.error || "Export failed");
+        if (s.state === "done") break;
+        setExportStatus(`Exporting... ${s.processed.toLocaleString()} rows`);
+      }
+
+      setExportStatus("Downloading...");
+      const blob = await exportFileApi(resource, jobId);
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${resource}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      window.alert("Export failed. Please try again.");
+    } finally {
+      setExporting(false);
+      setExportStatus("");
     }
-
-    setExportStatus('Downloading...');
-    const blob = await exportFileApi(resource, jobId);
-
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${resource}-${new Date().toISOString().slice(0, 10)}.xlsx`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  } catch {
-    window.alert('Export failed. Please try again.');
-  } finally {
-    setExporting(false);
-    setExportStatus('');
-  }
-};
+  };
   const onImported = () => {
     // Reload the current view (the fetch effect will not re-run if page/filters are unchanged).
     setPage(1);
@@ -690,112 +884,151 @@ const exportExcel = async () => {
         sortBy,
         sortOrder,
         filters: effectiveFilters,
-      })
+      }),
     );
   };
 
   const addBlank = () => {
-    dispatch(addRow({ resource, row: Object.fromEntries(fields.map((f) => [f.key, ''])) }));
+    dispatch(
+      addRow({
+        resource,
+        row: Object.fromEntries(fields.map((f) => [f.key, ""])),
+      }),
+    );
   };
 
   const toggleColumn = (key) =>
     setVisibleKeys((current) =>
-      current.includes(key) ? current.filter((k) => k !== key) : [...current, key]
+      current.includes(key)
+        ? current.filter((k) => k !== key)
+        : [...current, key],
     );
-  useEffect(() => { setPage(1); }, [companyList]);
+  useEffect(() => {
+    setPage(1);
+  }, [companyList]);
 
   const onPickCompanyList = async (e) => {
     const file = e.target.files?.[0];
-    e.target.value = '';
+    e.target.value = "";
     if (!file) return;
-    setListError('');
+    setListError("");
     try {
       const res = await uploadCompanyListApi(file);
       setCompanyList({ ...res, fileName: file.name });
     } catch (err) {
-      setListError(err?.response?.data?.message || 'Could not read the file.');
+      setListError(err?.response?.data?.message || "Could not read the file.");
     }
   };
   // Clears only the user's own filters; the locked URL filters stay.
   const clearAll = () => {
     setFilterModels({});
-    setSearchInput('');
+    setSearchInput("");
     setSortColumns([]);
   };
 
   const activeCount =
-    Object.keys(filters).length + (search ? 1 : 0) + (sortColumns.length ? 1 : 0);
-  const startRecord = pagination.total ? (pagination.page - 1) * pagination.limit + 1 : 0;
-  const endRecord = Math.min(pagination.page * pagination.limit, pagination.total);
+    Object.keys(filters).length +
+    (search ? 1 : 0) +
+    (sortColumns.length ? 1 : 0);
+  const startRecord = pagination.total
+    ? (pagination.page - 1) * pagination.limit + 1
+    : 0;
+  const endRecord = Math.min(
+    pagination.page * pagination.limit,
+    pagination.total,
+  );
   const totalPages = Math.max(1, pagination.totalPages);
 
   return (
     <section className="dgp">
-     
-<div className="dgp-card dgp-head">
-  <div>
-    <h2 className="dgp-title">{title}</h2>
-    <span className="dgp-badge">
-      {pagination.total.toLocaleString()} total records
-    </span>
-  </div>
+      <div className="dgp-card dgp-head">
+        <div>
+          <h2 className="dgp-title">{title}</h2>
+          <span className="dgp-badge">
+            {pagination.total.toLocaleString()} total records
+          </span>
+        </div>
 
-  <div className="flex flex-wrap items-center justify-end gap-3">
-    {resource === 'prospect' && canEdit && (
-      <button
-        type="button"
-        className="dgp-btn dgp-btn-primary"
-        onClick={() => setShowImport(true)}
-      >
-        Import Excel
-      </button>
-    )}
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          {resource === "prospect" && canEdit && (
+            <button
+              type="button"
+              className="dgp-btn dgp-btn-primary"
+              onClick={() => setShowImport(true)}
+            >
+              Import Excel
+            </button>
+          )}
 
-    {resource === 'company' && canEdit && (
-      <button
-        type="button"
-        onClick={() => setImportOpen(true)}
-        className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-      >
-        Import Excel
-      </button>
-    )}
+          {resource === "company" && canEdit && (
+            <button
+              type="button"
+              onClick={() => setImportOpen(true)}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+            >
+              Import Excel
+            </button>
+          )}
 
-      {(resource === 'prospect' || resource === 'company') && (
-      <button
-        type="button"
-        className="dgp-btn"
-        onClick={() => setShowListModal(true)}
-      >
-        Filter by company list
-      </button>
-    )}
-  </div>
+          {(resource === "prospect" || resource === "company") && (
+            <button
+              type="button"
+              className="dgp-btn"
+              onClick={() => setShowListModal(true)}
+            >
+              Filter by company list
+            </button>
+          )}
+          {resource === "prospect" && canEdit && selectedRows.size > 0 && (
+            <button
+              type="button"
+              className="dgp-btn dgp-btn-primary"
+              onClick={updateLinkedinProfiles}
+              disabled={linkedinBusy}
+            >
+              {linkedinBusy
+                ? "Updating..."
+                : `Update LinkedIn Profile (${selectedRows.size})`}
+            </button>
+          )}
+          {selectedRows.size > 0 && (
+            <button
+              type="button"
+              className="dgp-btn"
+              onClick={() => setSelectedRows(new Set())}
+            >
+              Clear selection
+            </button>
+          )}
+        </div>
 
-  <CompanyListModal
-    open={showListModal}
-    onClose={() => setShowListModal(false)}
-    onApplied={setCompanyList}
-  />
+        <CompanyListModal
+          open={showListModal}
+          onClose={() => setShowListModal(false)}
+          onApplied={setCompanyList}
+        />
 
-  {showImport && (
-    <ImportExcelModal
-      onClose={() => setShowImport(false)}
-      onImported={onImported}
-    />
-  )}
-</div>
+        {showImport && (
+          <ImportExcelModal
+            onClose={() => setShowImport(false)}
+            onImported={onImported}
+          />
+        )}
+      </div>
 
-
-<CompanyImportModal
-  open={importOpen}
-  onClose={() => setImportOpen(false)}
-  onDone={() => dispatch(fetchRows({ resource: 'company', page: 1, limit: 10 }))}
-/>
+      <CompanyImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onDone={() =>
+          dispatch(fetchRows({ resource: "company", page: 1, limit: 10 }))
+        }
+      />
       <div className="dgp-card">
         <div className="dgp-toolbar">
           <div className="dgp-search">
-            <span className="dgp-search-icon" aria-hidden="true">⌕</span>
+            <span className="dgp-search-icon" aria-hidden="true">
+              ⌕
+            </span>
             <input
               type="search"
               className="dgp-input"
@@ -813,15 +1046,17 @@ const exportExcel = async () => {
               </button>
             )}
 
-          <button
-            type="button"
-            className="dgp-btn dgp-btn-success"
-            onClick={exportExcel}
-            disabled={exporting || pagination.total === 0}
-            title="Download all rows matching the current search, sort and filters"
-          >
-           {exporting ? exportStatus || 'Exporting...' : `Export Excel (${pagination.total.toLocaleString()})`}
-          </button>
+            <button
+              type="button"
+              className="dgp-btn dgp-btn-success"
+              onClick={exportExcel}
+              disabled={exporting || pagination.total === 0}
+              title="Download all rows matching the current search, sort and filters"
+            >
+              {exporting
+                ? exportStatus || "Exporting..."
+                : `Export Excel (${pagination.total.toLocaleString()})`}
+            </button>
 
             <div className="dgp-menu-wrap">
               <button
@@ -835,7 +1070,10 @@ const exportExcel = async () => {
 
               {showColumnsMenu && (
                 <>
-                  <div className="agm-backdrop" onClick={() => setShowColumnsMenu(false)} />
+                  <div
+                    className="agm-backdrop"
+                    onClick={() => setShowColumnsMenu(false)}
+                  />
                   <div className="dgp-colmenu">
                     <div className="dgp-colmenu-head">
                       <strong>Show, hide &amp; reorder</strong>
@@ -843,15 +1081,19 @@ const exportExcel = async () => {
                         <button
                           type="button"
                           className="dgp-link"
-                          onClick={() => setVisibleKeys(fields.map((f) => f.key))}
+                          onClick={() =>
+                            setVisibleKeys(fields.map((f) => f.key))
+                          }
                         >
                           Show all
                         </button>
-                        {' · '}
+                        {" · "}
                         <button
                           type="button"
                           className="dgp-link"
-                          onClick={() => setColumnOrder(fields.map((f) => f.key))}
+                          onClick={() =>
+                            setColumnOrder(fields.map((f) => f.key))
+                          }
                         >
                           Reset order
                         </button>
@@ -907,7 +1149,9 @@ const exportExcel = async () => {
                 }}
               >
                 {[10, 25, 50, 100].map((size) => (
-                  <option key={size} value={size}>{size}</option>
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
                 ))}
               </select>
             </label>
@@ -916,54 +1160,94 @@ const exportExcel = async () => {
 
         {error && <div className="dgp-alert">{String(error)}</div>}
 
+        <div className={`dgp-grid ${loading ? "is-loading" : ""}`}>
+          <HeaderCtx.Provider value={headerCtx}>
+            {listError && <div className="dgp-alert">{listError}</div>}
+            {companyList && (
+              <div className="dgp-chip">
+                Company list: {companyList.fileName} ({companyList.domainCount}{" "}
+                domains, {companyList.nameCount} names)
+                <button
+                  type="button"
+                  className="dgp-link"
+                  onClick={() => setCompanyList(null)}
+                >
+                  Clear
+                </button>
+              </div>
+            )}
 
+            <DataGrid
+              className="rdg-light ag-like"
+              columns={columns}
+              rows={rows}
+              rowKeyGetter={(row) => row._id}
+              selectedRows={selectedRows}
+              onSelectedRowsChange={handleSelectedRowsChange}
+              onRowsChange={onRowsChange}
+              rowHeight={42}
+              headerRowHeight={84}
+              rowClass={(_, index) => (index % 2 ? "ag-row-alt" : undefined)}
+              defaultColumnOptions={{ resizable: true }}
+            />
+          </HeaderCtx.Provider>
 
-        <div className={`dgp-grid ${loading ? 'is-loading' : ''}`}>
-  <HeaderCtx.Provider value={headerCtx}>
-    {listError && <div className="dgp-alert">{listError}</div>}
-{companyList && (
-  <div className="dgp-chip">
-    Company list: {companyList.fileName} ({companyList.domainCount} domains, {companyList.nameCount} names)
-    <button type="button" className="dgp-link" onClick={() => setCompanyList(null)}>Clear</button>
-  </div>
-)}
-    <DataGrid
-      className="rdg-light ag-like"
-      columns={columns}
-      rows={rows}
-      rowKeyGetter={(row) => row._id}
-      onRowsChange={onRowsChange}
-      rowHeight={42}
-      headerRowHeight={84}
-      rowClass={(_, index) => (index % 2 ? 'ag-row-alt' : undefined)}
-      defaultColumnOptions={{ resizable: true }}
-    />
-  </HeaderCtx.Provider>
+          {loading && (
+            <div className="dgp-loader" role="status" aria-live="polite">
+              <span className="dgp-spinner" />
+              <span className="dgp-loader-text">Loading data...</span>
+            </div>
+          )}
 
-  {loading && (
-    <div className="dgp-loader" role="status" aria-live="polite">
-      <span className="dgp-spinner" />
-      <span className="dgp-loader-text">Loading data...</span>
-    </div>
-  )}
-
-  {!loading && rows.length === 0 && (
-    <div className="dgp-empty">No records match your search or filters.</div>
-  )}
-</div>
+          {!loading && rows.length === 0 && (
+            <div className="dgp-empty">
+              No records match your search or filters.
+            </div>
+          )}
+        </div>
 
         <div className="dgp-foot">
           <span className="dgp-muted">
-            Showing {startRecord.toLocaleString()}–{endRecord.toLocaleString()} of{' '}
-            {pagination.total.toLocaleString()}
+            Showing {startRecord.toLocaleString()}–{endRecord.toLocaleString()}{" "}
+            of {pagination.total.toLocaleString()}
           </span>
 
           <div className="dgp-pager">
-            <button type="button" className="dgp-btn dgp-btn-sm" disabled={!pagination.hasPrevPage || loading} onClick={() => setPage(1)}>«</button>
-            <button type="button" className="dgp-btn dgp-btn-sm" disabled={!pagination.hasPrevPage || loading} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</button>
-            <span className="dgp-page">Page {pagination.page} of {totalPages}</span>
-            <button type="button" className="dgp-btn dgp-btn-sm" disabled={!pagination.hasNextPage || loading} onClick={() => setPage((p) => p + 1)}>Next</button>
-            <button type="button" className="dgp-btn dgp-btn-sm" disabled={!pagination.hasNextPage || loading} onClick={() => setPage(totalPages)}>»</button>
+            <button
+              type="button"
+              className="dgp-btn dgp-btn-sm"
+              disabled={!pagination.hasPrevPage || loading}
+              onClick={() => setPage(1)}
+            >
+              «
+            </button>
+            <button
+              type="button"
+              className="dgp-btn dgp-btn-sm"
+              disabled={!pagination.hasPrevPage || loading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Previous
+            </button>
+            <span className="dgp-page">
+              Page {pagination.page} of {totalPages}
+            </span>
+            <button
+              type="button"
+              className="dgp-btn dgp-btn-sm"
+              disabled={!pagination.hasNextPage || loading}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Next
+            </button>
+            <button
+              type="button"
+              className="dgp-btn dgp-btn-sm"
+              disabled={!pagination.hasNextPage || loading}
+              onClick={() => setPage(totalPages)}
+            >
+              »
+            </button>
           </div>
         </div>
       </div>

@@ -34,10 +34,10 @@ export const updateRowApi = (resource, id, changes) =>
 export const deleteRowApi = (resource, id) =>
   api.delete(`/private/data/${resource}/${id}`).then((response) => response.data);
 
-export const getDashboardStatsApi = (userId = '') =>
+export const getDashboardStatsApi = (employeeName = '') =>
   api
     .get('/private/dashboard-stats', {
-      params: userId ? { userId } : {},
+      params: employeeName ? { employeeName } : {},
     })
     .then((response) => response.data);
 // Distinct values for the column filter checklist.
@@ -163,3 +163,6 @@ export const downloadCompanyListSampleApi = async () => {
   });
   return data;
 };
+
+export const updateLinkedinProfilesApi = (resource, ids) =>
+  api.post('/private/linkedin-update', { resource, ids }).then((r) => r.data);

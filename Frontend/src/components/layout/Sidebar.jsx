@@ -1,57 +1,55 @@
-import { useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
-import { can } from '../../features/authSlice';
+import { useState } from "react";
+import { NavLink, useLocation } from "react-router-dom";
+import { can } from "../../features/authSlice";
 
 const navigation = [
   {
-    label: 'OVERVIEW',
+    label: "OVERVIEW",
     items: [
       {
-        name: 'Dashboard',
-        path: '/dashboard',
-        icon: '▦',
+        name: "Dashboard",
+        path: "/dashboard",
+        icon: "▦",
         resource: null,
       },
     ],
   },
   {
-    label: 'WORKSPACE',
+    label: "WORKSPACE",
     items: [
       {
-        name: 'Prospects',
-        path: '/prospects',
-        icon: '♙',
-        resource: 'prospect',
+        name: "Prospects",
+        path: "/prospects",
+        icon: "♙",
+        resource: "prospect",
         children: [
-          { name: 'Dashboard', path: '/prospects/dashbaord' },
-          { name: 'All Prospects', path: '/prospects/viewall' },
-        
-        
+          { name: "Dashboard", path: "/prospects/dashbaord" },
+          { name: "All Prospects", path: "/prospects/viewall" },
         ],
       },
       {
-        name: 'Companies',
-        path: '/companies',
-        icon: '▤',
-        resource: 'company',
+        name: "Companies",
+        path: "/companies",
+        icon: "▤",
+        resource: "company",
       },
       {
-        name: 'User management',
-        path: '/users',
-        icon: '♧',
-        resource: 'user',
+        name: "User management",
+        path: "/users",
+        icon: "♧",
+        resource: "user",
+      },
+      {
+        name: "User Activity",
+        path: "/user-activities",
+        icon: "♙",
+        resource: "user",
       },
     ],
   },
 ];
 
-export default function Sidebar({
-  user,
-  isOpen,
-  onClose,
-  mini,
-  onToggleMini,
-}) {
+export default function Sidebar({ user, isOpen, onClose, mini, onToggleMini }) {
   const location = useLocation();
 
   const [expandedMenus, setExpandedMenus] = useState({
@@ -81,15 +79,15 @@ export default function Sidebar({
           border-r border-slate-200 bg-white text-slate-700
           transition-all duration-300
           dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200
-          ${mini ? 'w-20' : 'w-60'}
+          ${mini ? "w-20" : "w-60"}
           lg:translate-x-0
-          ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}
+          ${isOpen ? "translate-x-0" : "-translate-x-full"}`}
       >
         {/* Brand */}
         <div
           className={`relative flex h-20 shrink-0 items-center border-b
             border-slate-200 dark:border-slate-800
-            ${mini ? 'justify-center px-2' : 'justify-between px-5'}`}
+            ${mini ? "justify-center px-2" : "justify-between px-5"}`}
         >
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-xl font-bold text-white shadow-sm">
@@ -114,31 +112,28 @@ export default function Sidebar({
           <button
             type="button"
             onClick={onToggleMini}
-            title={mini ? 'Expand sidebar' : 'Collapse sidebar'}
-            aria-label={mini ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={mini ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={mini ? "Expand sidebar" : "Collapse sidebar"}
             className={`hidden h-8 w-8 shrink-0 items-center justify-center
               rounded-lg text-slate-500 hover:bg-slate-100 hover:text-indigo-600
               dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-indigo-400
               lg:flex ${
                 mini
-                  ? 'absolute -right-3 top-7 z-10 border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900'
-                  : ''
+                  ? "absolute -right-3 top-7 z-10 border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900"
+                  : ""
               }`}
           >
-            {mini ? '»' : '«'}
+            {mini ? "»" : "«"}
           </button>
         </div>
 
         {/* Navigation */}
         <div
-          className={`flex-1 overflow-y-auto py-6 ${
-            mini ? 'px-2' : 'px-3'
-          }`}
+          className={`flex-1 overflow-y-auto py-6 ${mini ? "px-2" : "px-3"}`}
         >
           {navigation.map((group) => {
             const visibleItems = group.items.filter(
-              (item) =>
-                !item.resource || can(user, item.resource, 'view')
+              (item) => !item.resource || can(user, item.resource, "view"),
             );
 
             if (!visibleItems.length) return null;
@@ -153,19 +148,17 @@ export default function Sidebar({
 
                 <nav className="space-y-1">
                   {visibleItems.map((item) => {
-                    const hasChildren = Boolean(
-                      item.children?.length
-                    );
+                    const hasChildren = Boolean(item.children?.length);
 
                     const isExpanded =
                       expandedMenus[item.name] ||
                       item.children?.some(
-                        (child) => child.path === location.pathname
+                        (child) => child.path === location.pathname,
                       );
 
                     const isParentActive = hasChildren
                       ? item.children.some(
-                          (child) => child.path === location.pathname
+                          (child) => child.path === location.pathname,
                         )
                       : location.pathname === item.path;
 
@@ -176,8 +169,8 @@ export default function Sidebar({
                             transition-colors
                             ${
                               isParentActive
-                                ? 'border-indigo-100 bg-indigo-50 text-indigo-700 dark:border-indigo-400/30 dark:bg-indigo-500/15 dark:text-indigo-300'
-                                : 'border-transparent text-slate-600 dark:text-slate-300'
+                                ? "border-indigo-100 bg-indigo-50 text-indigo-700 dark:border-indigo-400/30 dark:bg-indigo-500/15 dark:text-indigo-300"
+                                : "border-transparent text-slate-600 dark:text-slate-300"
                             }`}
                         >
                           {hasChildren ? (
@@ -193,11 +186,7 @@ export default function Sidebar({
                               }}
                               className={`flex min-w-0 flex-1 items-center py-2.5 text-left text-sm font-medium
                                 hover:text-indigo-600 dark:hover:text-indigo-400
-                                ${
-                                  mini
-                                    ? 'justify-center px-2'
-                                    : 'gap-3 px-3'
-                                }`}
+                                ${mini ? "justify-center px-2" : "gap-3 px-3"}`}
                             >
                               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-lg">
                                 {item.icon}
@@ -210,7 +199,7 @@ export default function Sidebar({
                                   </span>
                                   <span
                                     className={`text-xs transition-transform ${
-                                      isExpanded ? 'rotate-90' : ''
+                                      isExpanded ? "rotate-90" : ""
                                     }`}
                                   >
                                     ›
@@ -224,19 +213,13 @@ export default function Sidebar({
                               onClick={onClose}
                               title={mini ? item.name : undefined}
                               className={`flex min-w-0 flex-1 items-center py-2.5 text-sm font-medium
-                                ${
-                                  mini
-                                    ? 'justify-center px-2'
-                                    : 'gap-3 px-3'
-                                }`}
+                                ${mini ? "justify-center px-2" : "gap-3 px-3"}`}
                             >
                               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-lg">
                                 {item.icon}
                               </span>
                               {!mini && (
-                                <span className="truncate">
-                                  {item.name}
-                                </span>
+                                <span className="truncate">{item.name}</span>
                               )}
                             </NavLink>
                           )}
@@ -254,15 +237,13 @@ export default function Sidebar({
                                 className={({ isActive }) =>
                                   `flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
                                     isActive
-                                      ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300'
-                                      : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white'
+                                      ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300"
+                                      : "text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
                                   }`
                                 }
                               >
                                 <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
-                                <span className="truncate">
-                                  {child.name}
-                                </span>
+                                <span className="truncate">{child.name}</span>
                               </NavLink>
                             ))}
                           </div>

@@ -447,7 +447,22 @@ const groupByText = (field, limit) => [
   { $limit: limit },
   { $project: { _id: 0, label: 1, count: 1 } },
 ];
-
+/* Group by employeeName (case-insensitive), with qualified / disqualified split. */
+const groupByEmployeeName = (limit) => [
+  { $match: { employeeName: { $nin: [null, ''] } } },
+  {
+    $group: {
+      _id: { $toLower: { $trim: { input: '$employeeName' } } },
+      label: { $first: '$employeeName' },
+      count: { $sum: 1 },
+      qualified: { $sum: { $cond: [{ $eq: ['$status', 'Qualified'] }, 1, 0] } },
+      disqualified: { $sum: { $cond: [{ $eq: ['$status', 'DisQualified'] }, 1, 0] } },
+    },
+  },
+  { $sort: { count: -1, _id: 1 } },
+  { $limit: limit },
+  { $project: { _id: 0, label: 1, count: 1, qualified: 1, disqualified: 1 } },
+];
 const dailyCounts = [
   {
     $group: {
@@ -554,6 +569,8 @@ Company.countDocuments(dateMatch({ $gte: dayStart })),
           byCountry: groupByText('country', top),
           byCompany: groupByText('companyName', top),
           byEmployeeSize: groupByText('employeeSize', top),
+          byJobLevel: groupByText('jobLevel', top),          // NEW
+          byEmployeeName: groupByEmployeeName(top),          // NEW
           byEmployee: [
             {
               $group: {
@@ -632,6 +649,8 @@ Company.countDocuments(dateMatch({ $gte: dayStart })),
       prospectsByCountry: p.byCountry,
       prospectsByCompany: p.byCompany,
       prospectsByEmployee: byEmployee,
+      prospectsByEmployeeName: p.byEmployeeName,
+      prospectsByJobLevel: p.byJobLevel, 
       prospectsByEmployeeSize: p.byEmployeeSize,
       prospectsOverTime: p.overTime,
       companiesOverTime: c.overTime,

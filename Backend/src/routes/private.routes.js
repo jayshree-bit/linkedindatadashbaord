@@ -5,8 +5,19 @@ import * as data from "../controllers/data.controller.js";
 import multer from 'multer';
 import { importProspectsExcel, getImportStatus, getDashboard } from '../controllers/data.controller.js';
 import { importCompaniesExcel, getCompanyImportStatus } from '../controllers/companyImport.controller.js';
+import { getUserActivities } from "../controllers/userActivity.controller.js";
+import { userActivityLogger } from "../middleware/userActivityLogger.js";
+
 const r = Router();
+r.use(authenticate);
+r.use(userActivityLogger);
 r.use(authenticate); // everything below needs a valid token
+//User Activity routes  
+r.get(
+  "/user-activities",
+  authorize("user", "view"),
+  getUserActivities
+);
 
 // User manager (needs "user" permission)
 r.get("/users", authorize("user", "view"), users.getUsers);
@@ -15,7 +26,11 @@ r.post("/users", authorize("user", "edit"), users.addUser);
 r.put("/users/:id", authorize("user", "edit"), users.editUser);
 r.delete("/users/:id", authorize("user", "edit"), users.removeUser);
 r.put("/roles/:id", authorize("user", "edit"), users.editRole);
-
+r.put(
+  "/users/me/profile",
+  authorize("user", "view"),
+  users.updateMyProfile
+);
 // Prospect / company: GET => view permission, other methods => edit permission
 const resource = (req) => req.params.resource;
 const action = (req) => (req.method === "GET" ? "view" : "edit");

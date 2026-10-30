@@ -75,6 +75,9 @@ const slice = createSlice({
     clearAuthError(state) {
       state.error = null;
     },
+    profileUpdated(state, action) {
+  state.user = action.payload;
+},
   },
 
   extraReducers: (builder) => {
@@ -126,7 +129,7 @@ const slice = createSlice({
   },
 });
 
-export const { clearAuthError } = slice.actions;
+export const { clearAuthError, profileUpdated } = slice.actions;
 
 export const can = (user, resource, action) =>
   !!user?.role?.permissions?.[resource]?.[action];

@@ -167,7 +167,50 @@ function HBar({ data, dataKey = 'count', labelKey = 'label', color = '#6366f1', 
     </ResponsiveContainer>
   );
 }
+function EmployeeTable({ rows }) {
+  const sum = (key) => rows.reduce((acc, r) => acc + (r[key] || 0), 0);
 
+  return (
+    <div className="h-full overflow-auto rounded-xl border border-slate-200 dark:border-slate-800">
+      <table className="w-full text-sm">
+        <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800">
+          <tr className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            <th className="px-4 py-3 text-left font-semibold">Employee name</th>
+            <th className="px-4 py-3 text-right font-semibold">Qualified</th>
+            <th className="px-4 py-3 text-right font-semibold">Disqualified</th>
+            <th className="px-4 py-3 text-right font-semibold">Total</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+          {rows.map((r) => (
+            <tr key={r.label} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+              <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{r.label}</td>
+              <td className="px-4 py-3 text-right">
+                <span className="rounded-md bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300">
+                  {nf.format(r.qualified)}
+                </span>
+              </td>
+              <td className="px-4 py-3 text-right">
+                <span className="rounded-md bg-rose-50 px-2 py-0.5 font-semibold text-rose-600 dark:bg-rose-500/15 dark:text-rose-300">
+                  {nf.format(r.disqualified)}
+                </span>
+              </td>
+              <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">{nf.format(r.count)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot className="sticky bottom-0 bg-slate-50 font-bold dark:bg-slate-800">
+          <tr className="text-slate-900 dark:text-white">
+            <td className="px-4 py-3">Total</td>
+            <td className="px-4 py-3 text-right">{nf.format(sum('qualified'))}</td>
+            <td className="px-4 py-3 text-right">{nf.format(sum('disqualified'))}</td>
+            <td className="px-4 py-3 text-right">{nf.format(sum('count'))}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
 /* ---------- page ---------- */
 export default function Dashboard() {
   const dispatch = useDispatch();
@@ -204,6 +247,15 @@ export default function Dashboard() {
   );
 
   const sizeData = charts?.prospectsByEmployeeSize ?? [];
+  const jobLevelData = charts?.prospectsByJobLevel ?? [];
+const employeeNameData = useMemo(
+  () =>
+    (charts?.prospectsByEmployeeName ?? []).map((r) => ({
+      ...r,
+      other: Math.max(0, r.count - r.qualified - r.disqualified),
+    })),
+  [charts]
+);
   const showSkeleton = loading && !data;
 
   const presets = [
@@ -379,26 +431,34 @@ export default function Dashboard() {
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard
-          className="xl:col-span-2"
-          title="Prospects by employee"
-          subtitle="Qualified vs disqualified uploads"
-          loading={showSkeleton}
-          empty={!showSkeleton && !employeeData.length}
-        >
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={employeeData} margin={{ left: -10, right: 10 }}>
-              <CartesianGrid vertical={false} stroke={GRID} />
-              <XAxis dataKey="label" tick={{ fill: AXIS, fontSize: 11 }} tickFormatter={(v) => truncate(v, 10)} axisLine={false} tickLine={false} />
-              <YAxis allowDecimals={false} tick={{ fill: AXIS, fontSize: 11 }} axisLine={false} tickLine={false} />
-              <Tooltip {...tooltipStyle} />
-              <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="qualified" name="Qualified" stackId="s" fill="#10b981" />
-              <Bar dataKey="disqualified" name="Disqualified" stackId="s" fill="#f43f5e" />
-              <Bar dataKey="other" name="Other" stackId="s" fill="#94a3b8" radius={[8, 8, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
+       <ChartCard
+  className="xl:col-span-2"
+  title="Prospects by employee name"
+  subtitle="Qualified vs disqualified"
+  loading={showSkeleton}
+  empty={!showSkeleton && !employeeNameData.length}
+>
+  <ResponsiveContainer width="100%" height="100%">
+    <BarChart data={employeeNameData} layout="vertical" margin={{ left: 8, right: 24 }}>
+      <CartesianGrid horizontal={false} stroke={GRID} />
+      <XAxis type="number" allowDecimals={false} tick={{ fill: AXIS, fontSize: 11 }} tickFormatter={compact.format} axisLine={false} tickLine={false} />
+      <YAxis
+        type="category"
+        dataKey="label"
+        width={120}
+        tick={{ fill: AXIS, fontSize: 11 }}
+        tickFormatter={(v) => truncate(v, 18)}
+        axisLine={false}
+        tickLine={false}
+      />
+      <Tooltip {...tooltipStyle} />
+      <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
+      <Bar dataKey="qualified" name="Qualified" stackId="s" fill="#10b981" barSize={16} />
+      <Bar dataKey="disqualified" name="Disqualified" stackId="s" fill="#f43f5e" />
+      <Bar dataKey="other" name="Other" stackId="s" fill="#94a3b8" radius={[0, 8, 8, 0]} />
+    </BarChart>
+  </ResponsiveContainer>
+</ChartCard>
 
         <ChartCard
           title="Prospects by country"
@@ -411,12 +471,13 @@ export default function Dashboard() {
 
         <ChartCard
           className="xl:col-span-2"
-          title="Top companies by prospects"
-          subtitle="Companies with the most prospects"
+          title="Prospects by job level"
+          subtitle="Top job levels"
           loading={showSkeleton}
           empty={!showSkeleton && !(charts?.prospectsByCompany ?? []).length}
         >
-          <HBar data={charts?.prospectsByCompany ?? []} color="#8b5cf6" />
+           <HBar data={jobLevelData} color="multi" />
+
         </ChartCard>
 
         <ChartCard
@@ -427,7 +488,19 @@ export default function Dashboard() {
         >
           <HBar data={charts?.companyRevenue ?? []} dataKey="revenue" color="#f59e0b" format={(v) => compact.format(v)} />
         </ChartCard>
+        <ChartCard
+  className="xl:col-span-3"
+  title="Employee wise prospects"
+  subtitle="Qualified and disqualified count per employee"
+  loading={showSkeleton}
+  empty={!showSkeleton && !employeeNameData.length}
+>
+  <EmployeeTable rows={employeeNameData} />
+</ChartCard>
+
       </div>
     </div>
+
+    
   );
 }

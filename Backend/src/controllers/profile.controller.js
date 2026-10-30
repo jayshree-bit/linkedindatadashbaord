@@ -1,6 +1,5 @@
-
 import User from "../models/User.js";
-
+import { logUserActivity } from "../services/userActivity.service.js";
 export const uploadMyProfilePhoto = async (req, res, next) => {
   try {
     if (!req.file) {
@@ -16,10 +15,17 @@ export const uploadMyProfilePhoto = async (req, res, next) => {
           profilePhoto: `/uploads/profiles/${req.file.filename}`,
         },
       },
-      { new: true }
+      { new: true },
     )
       .select("-password")
       .populate("role");
+
+    await logUserActivity(req, {
+      action: "PROFILE_PHOTO_UPDATED",
+      description: "User updated their profile photo",
+      resource: "user",
+      resourceId: req.user._id.toString(),
+    });
 
     if (!user) {
       return res.status(404).json({

@@ -1,18 +1,19 @@
-import { useEffect } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { useDispatch, useSelector } from 'react-redux';
+import { useEffect } from "react";
+import { Routes, Route, Navigate } from "react-router-dom";
+import { useDispatch, useSelector } from "react-redux";
 
-import { fetchMe } from './features/authSlice';
-import ProtectedRoute from './components/ProtectedRoute';
-import Layout from './components/layout/Layout';
+import { fetchMe } from "./features/authSlice";
+import ProtectedRoute from "./components/ProtectedRoute";
+import Layout from "./components/layout/Layout";
 
-import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import Prospects from './pages/Prospects/Prospects';
-import Companies from './pages/Companies';
-import UserManager from './pages/UserManager';
-import DashboardProspects from './pages/Prospects/Dashboard';
-import NotificationPage from './pages/NotificationPage';
+import Login from "./pages/Login";
+import Dashboard from "./pages/Dashboard";
+import Prospects from "./pages/Prospects/Prospects";
+import Companies from "./pages/Companies";
+import UserManager from "./pages/UserManager";
+import DashboardProspects from "./pages/Prospects/Dashboard";
+import NotificationPage from "./pages/NotificationPage";
+import UserActivityPage from "./pages/UserActivityPage";
 export default function App() {
   const dispatch = useDispatch();
   const { initialized, user } = useSelector((state) => state.auth);
@@ -34,9 +35,7 @@ export default function App() {
       {/* Login */}
       <Route
         path="/login"
-        element={
-          user ? <Navigate to="/dashboard" replace /> : <Login />
-        }
+        element={user ? <Navigate to="/dashboard" replace /> : <Login />}
       />
 
       {/* Shared layout */}
@@ -47,10 +46,7 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route
-          path="/"
-          element={<Navigate to="/dashboard" replace />}
-        />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
         {/* Admin-only dashboard */}
         <Route
@@ -61,10 +57,7 @@ export default function App() {
             </ProtectedRoute>
           }
         />
-<Route
-  path="/notifications"
-  element={<NotificationPage />}
-/>
+        <Route path="/notifications" element={<NotificationPage />} />
         {/* Permission-protected pages */}
         <Route
           path="/prospects/viewall"
@@ -74,8 +67,17 @@ export default function App() {
             </ProtectedRoute>
           }
         />
-        
-         <Route
+
+    <Route
+    path="/user-activities"
+    element={
+      <ProtectedRoute resource="user">
+        <UserActivityPage />
+      </ProtectedRoute>
+    }
+  />
+
+        <Route
           path="/prospects/dashbaord"
           element={
             <ProtectedRoute resource="prospect">
