@@ -74,7 +74,7 @@ const PROSPECT_COLUMN_MAP = {
 
 const EMPTY_STATS = { total: 0, qualified: 0, disqualified: 0 };
 const LIST_LIMIT = 200;
-
+const loggedLinkedinJobs = new Set();
 export const getProspectDashboardStats = async (req, res, next) => {
   try {
     const employeeName = String(req.query.employeeName || '').trim();
@@ -1016,12 +1016,14 @@ export async function companyListSample(req, res, next) {
   }
 }
 
+
 export const updateLinkedinProfiles = async (req, res, next) => {
   try {
     if (req.params.resource !== "prospect") {
       return res.status(400).json({ message: "Only prospects are supported." });
     }
-    const ids = (req.body.records || []).map((r) => r._id).filter(Boolean);
+    const records = req.body.records || [];
+    const ids = records.map((r) => r._id).filter(Boolean);
     if (!ids.length) return res.status(400).json({ message: "No records selected." });
 
     const r = await fetch(`${PY_URL}/api/prospects/update-linkedin`, {
@@ -1031,6 +1033,19 @@ export const updateLinkedinProfiles = async (req, res, next) => {
     });
     const data = await r.json();
     if (!r.ok) return res.status(r.status).json({ message: data.detail || "Scraper error" });
+
+    void logUserActivity(req, {
+      action: "LINKEDIN_UPDATE_STARTED",
+      description: `Started LinkedIn profile update for ${ids.length} prospect(s)`,
+      resource: "prospect",
+      resourceId: data.jobId || null,
+      metadata: {
+        jobId: data.jobId || null,
+        selectedCount: ids.length,
+        prospectIds: ids,
+      },
+    });
+
     res.status(202).json(data);
   } catch (e) {
     next(e);
@@ -1039,8 +1054,46 @@ export const updateLinkedinProfiles = async (req, res, next) => {
 
 export const linkedinUpdateStatus = async (req, res, next) => {
   try {
-    const r = await fetch(`${PY_URL}/api/prospects/update-linkedin/${req.params.jobId}`);
-    res.status(r.status).json(await r.json());
+    const jobId = req.params.jobId;
+    const r = await fetch(`${PY_URL}/api/prospects/update-linkedin/${jobId}`);
+    const data = await r.json();
+
+    const finished = ["done", "stopped", "failed"].includes(data?.state);
+    if (r.ok && finished && !loggedLinkedinJobs.has(jobId)) {
+      loggedLinkedinJobs.add(jobId);
+      setTimeout(() => loggedLinkedinJobs.delete(jobId), 60 * 60 * 1000).unref?.();
+
+      const results = Array.isArray(data.results) ? data.results : [];
+      const count = (s) => results.filter((x) => x.status === s).length;
+      const skipped = count("skipped");
+      const failed = count("failed");
+
+      void logUserActivity(req, {
+        action: "LINKEDIN_UPDATE_COMPLETED",
+        description: `LinkedIn profile update ${data.state}: ${results.length}/${data.total ?? results.length} processed`,
+        resource: "prospect",
+        resourceId: jobId,
+        metadata: {
+          jobId,
+          state: data.state,
+          total: data.total ?? results.length,
+          processed: results.length,
+          updated: results.length - skipped - failed,
+          disqualified: count("disqualified"),
+          skipped,
+          failed,
+          error: data.error || null,
+          results: results.slice(0, 200).map((x) => ({
+            id: x.id,
+            name: x.name,
+            status: x.status,
+            summary: x.summary || (typeof x.detail === "string" ? x.detail : ""),
+          })),
+        },
+      });
+    }
+
+    res.status(r.status).json(data);
   } catch (e) {
     next(e);
   }

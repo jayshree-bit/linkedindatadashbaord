@@ -58,7 +58,10 @@ const MAX_SELECT = 1000;
 // Columns that stay pinned on the left for the prospect grid.
 // Compared after lowercasing and removing spaces/symbols.
 const STICKY_NAME_KEYS = new Set(["employeename", "name"]);
-const normKey = (k) => String(k).toLowerCase().replace(/[^a-z0-9]/g, "");
+const normKey = (k) =>
+  String(k)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 
 /* ---------- Toaster (no extra package needed) ---------- */
 
@@ -68,7 +71,46 @@ const TOAST_COLORS = {
   warning: "#d97706",
   info: "#2563eb",
 };
+const pageList = (page, total) => {
+  const nums = new Set([1, total, page - 1, page, page + 1]);
+  if (page <= 3) [2, 3, 4].forEach((n) => nums.add(n));
+  if (page >= total - 2)
+    [total - 1, total - 2, total - 3].forEach((n) => nums.add(n));
+  const sorted = [...nums]
+    .filter((n) => n >= 1 && n <= total)
+    .sort((a, b) => a - b);
+  const out = [];
+  sorted.forEach((n, i) => {
+    if (i && n - sorted[i - 1] > 1) out.push("…");
+    out.push(n);
+  });
+  return out;
+};
 
+const readDark = () => {
+  const els = [document.documentElement, document.body];
+  return els.some(
+    (el) =>
+      el.classList.contains("dark") ||
+      el.getAttribute("data-theme") === "dark" ||
+      el.getAttribute("data-bs-theme") === "dark",
+  );
+};
+
+function useIsDark() {
+  const [dark, setDark] = useState(readDark);
+  useEffect(() => {
+    const obs = new MutationObserver(() => setDark(readDark()));
+    const opts = {
+      attributes: true,
+      attributeFilter: ["class", "data-theme", "data-bs-theme"],
+    };
+    obs.observe(document.documentElement, opts);
+    obs.observe(document.body, opts);
+    return () => obs.disconnect();
+  }, []);
+  return dark;
+}
 function Toaster({ toasts, onClose }) {
   if (!toasts.length) return null;
   return createPortal(
@@ -570,6 +612,9 @@ const STATUS_COLORS = {
 };
 
 const renderFor = (key) => {
+  if (key === "updatedAt" || key === "createdAt") {
+    return ({ row }) => (row[key] ? new Date(row[key]).toLocaleString() : null);
+  }
   if (key === "Status" || key === "EBB Status") {
     return ({ row }) => {
       const value = row[key];
@@ -596,21 +641,234 @@ const renderFor = (key) => {
   }
   return undefined;
 };
+/* ---------- Card view + details modal ---------- */
 
+const pillColor = (value) => {
+  const v = String(value ?? "").toLowerCase();
+  if (v === "qualified") return "success";
+  if (v === "disqualified") return "danger";
+  return STATUS_COLORS[v] ?? "secondary";
+};
+
+const initialsOf = (text) =>
+  String(text || "?")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join("") || "?";
+
+function RecordCard({
+  row,
+  cfg,
+  fieldMap,
+  selected,
+  selectable,
+  onToggle,
+  onMore,
+}) {
+  const title = cfg.title(row);
+  const subtitle = cfg.subtitle?.(row);
+  const badge = cfg.badgeKey ? row[cfg.badgeKey] : null;
+function Avatar({ url, text }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [url]);
+
+  if (url && !failed) {
+    return (
+      <img
+        src={url}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }}
+      />
+    );
+  }
+  return initialsOf(text);
+}
+  return (
+    <article className={`dgp-card-item ${selected ? "is-selected" : ""}`}>
+      <header className="dgp-ci-head">
+        {selectable && (
+          <input
+            type="checkbox"
+            className="dgp-ci-check"
+            checked={selected}
+            onChange={onToggle}
+            aria-label={`Select ${title}`}
+          />
+        )}
+    <div className="dgp-ci-avatar" aria-hidden="true">
+  <Avatar url={row.profilePhotoUrl} text={title} />
+</div>
+        <div className="dgp-ci-id">
+          <h3 title={title}>{title}</h3>
+          {subtitle && <p title={subtitle}>{subtitle}</p>}
+        </div>
+        {badge && (
+          <span className={`dgp-pill dgp-pill-${pillColor(badge)}`}>
+            {badge}
+          </span>
+        )}
+      </header>
+
+      <dl className="dgp-ci-body">
+        {cfg.items.map((key) => {
+          const f = fieldMap.get(key);
+          if (!f) return null;
+          const render = renderFor(key);
+          const value = row[key];
+          return (
+            <div key={key} className="dgp-ci-row">
+              <dt>{f.name}</dt>
+              <dd>
+                {isBlankValue(value) ? (
+                  <span className="dgp-ci-empty">—</span>
+                ) : render ? (
+                  render({ row })
+                ) : (
+                  String(value)
+                )}
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
+
+      <footer className="dgp-ci-foot">
+        <span className="dgp-muted">
+          {row.updatedAt
+            ? `Updated ${new Date(row.updatedAt).toLocaleDateString("en-IN", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+              })}`
+            : ""}
+        </span>
+        <button type="button" className="dgp-btn dgp-btn-sm" onClick={onMore}>
+          View more
+        </button>
+      </footer>
+    </article>
+  );
+}
+
+function RecordModal({ row, cfg, fields, onClose }) {
+  const [showEmpty, setShowEmpty] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  if (!row) return null;
+
+  const title = cfg.title(row);
+  const subtitle = cfg.subtitle?.(row);
+  const onCard = new Set(cfg.items);
+  const rest = fields.filter((f) => !onCard.has(f.key));
+  const visible = showEmpty
+    ? rest
+    : rest.filter((f) => !isBlankValue(row[f.key]));
+
+  return createPortal(
+    <div className="dgp-modal-backdrop" onClick={onClose}>
+      <div
+        className="dgp-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${title} details`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="dgp-modal-head">
+          <div className="dgp-ci-avatar lg" aria-hidden="true">
+            {initialsOf(title)}
+          </div>
+          <div className="dgp-ci-id">
+            <h3>{title}</h3>
+            {subtitle && <p>{subtitle}</p>}
+          </div>
+          {cfg.badgeKey && row[cfg.badgeKey] && (
+            <span
+              className={`dgp-pill dgp-pill-${pillColor(row[cfg.badgeKey])}`}
+            >
+              {row[cfg.badgeKey]}
+            </span>
+          )}
+          <button
+            type="button"
+            className="dgp-modal-x"
+            aria-label="Close"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </header>
+
+        <div className="dgp-modal-tools">
+          <label>
+            <input
+              type="checkbox"
+              checked={showEmpty}
+              onChange={(e) => setShowEmpty(e.target.checked)}
+            />{" "}
+            Show empty fields
+          </label>
+          <span className="dgp-muted">{visible.length} fields</span>
+        </div>
+
+        <div className="dgp-modal-body">
+          {visible.length === 0 && (
+            <div className="dgp-muted">No additional details.</div>
+          )}
+          {visible.map((f) => {
+            const render = renderFor(f.key);
+            const value = row[f.key];
+            return (
+              <div key={f.key} className="dgp-md-row">
+                <dt>{f.name}</dt>
+                <dd>
+                  {isBlankValue(value) ? (
+                    <span className="dgp-ci-empty">—</span>
+                  ) : render ? (
+                    render({ row })
+                  ) : (
+                    String(value)
+                  )}
+                </dd>
+              </div>
+            );
+          })}
+        </div>
+
+        <footer className="dgp-modal-foot">
+          <button type="button" className="dgp-btn" onClick={onClose}>
+            Close
+          </button>
+        </footer>
+      </div>
+    </div>,
+    document.body,
+  );
+}
 /* ---------- Page ---------- */
 
 const NO_FIXED_FILTERS = {};
-
+const NO_SORT = [];
 export default function DataGridPage({
   resource,
   title,
   fields,
   fixedFilters = NO_FIXED_FILTERS,
+  cardConfig,
+  defaultSort = NO_SORT,
 }) {
   const dispatch = useDispatch();
   const { user } = useSelector((state) => state.auth);
   const dataState = useSelector((state) => state.data);
-
+  const isDark = useIsDark();
   const rows = dataState[resource] ?? [];
   const pagination = dataState.pagination?.[resource] ?? {
     page: 1,
@@ -649,7 +907,23 @@ export default function DataGridPage({
   const [listError, setListError] = useState("");
   const listInputRef = useRef(null);
   const [showListModal, setShowListModal] = useState(false);
+  const [view, setView] = useState("table"); // "table" | "card"
+  const [detailRow, setDetailRow] = useState(null);
+  const fieldMap = useMemo(
+    () => new Map(fields.map((f) => [f.key, f])),
+    [fields],
+  );
 
+  const cardCfg = useMemo(
+    () =>
+      cardConfig ?? {
+        title: (r) => String(r[fields[0]?.key] ?? "—"),
+        subtitle: null,
+        badgeKey: null,
+        items: fields.slice(1, 7).map((f) => f.key),
+      },
+    [cardConfig, fields],
+  );
   const [selectedRows, setSelectedRows] = useState(() => new Set()); // set of row _id
 
   const selectedCache = useRef(new Map()); // _id -> full row object
@@ -658,17 +932,18 @@ export default function DataGridPage({
   const fixedKey = JSON.stringify(fixedFilters);
   const [linkedinStatus, setLinkedinStatus] = useState("");
   const [linkedinJob, setLinkedinJob] = useState(null);
+  const [linkedinQueue, setLinkedinQueue] = useState([]);
   /* ---- Toasts ---- */
   const [toasts, setToasts] = useState([]);
   const toastId = useRef(0);
 
   const [colQuery, setColQuery] = useState("");
-const [colMenuOpen, setColMenuOpen] = useState(false);
-const [highlightKey, setHighlightKey] = useState(null);
-const [pendingScroll, setPendingScroll] = useState(null);
-const gridWrapRef = useRef(null);
-const [colActive, setColActive] = useState(0);
-const colFindRef = useRef(null);
+  const [colMenuOpen, setColMenuOpen] = useState(false);
+  const [highlightKey, setHighlightKey] = useState(null);
+  const [pendingScroll, setPendingScroll] = useState(null);
+  const gridWrapRef = useRef(null);
+  const [colActive, setColActive] = useState(0);
+  const colFindRef = useRef(null);
   const dismissToast = useCallback(
     (id) => setToasts((current) => current.filter((t) => t.id !== id)),
     [],
@@ -773,7 +1048,35 @@ const colFindRef = useRef(null);
     },
     [resource],
   );
+const STATUS_KEY = "status";
+const hasStatusField = fieldMap.has(STATUS_KEY);
+const statusLocked = Boolean(fixedFilters[STATUS_KEY]); // e.g. ?status=Qualified in the URL
+const [statusOptions, setStatusOptions] = useState([]);
 
+useEffect(() => {
+  if (view !== "card" || !hasStatusField || statusLocked) return;
+  let cancelled = false;
+  fetchDistinct(STATUS_KEY, "")
+    .then((res) => {
+      if (!cancelled)
+        setStatusOptions((res?.values ?? []).filter((v) => !isBlankValue(v)));
+    })
+    .catch(() => {});
+  return () => {
+    cancelled = true;
+  };
+}, [view, hasStatusField, statusLocked, fetchDistinct]);
+
+const activeStatus =
+  filterModels[STATUS_KEY]?.op === "equals"
+    ? (filterModels[STATUS_KEY].text ?? "")
+    : "";
+
+const pickStatus = (value) =>
+  headerCtx.setFilterModel(
+    STATUS_KEY,
+    value ? { op: "equals", text: value, values: null } : null,
+  );
   // Fields in the user's chosen order (new fields that appear later are appended).
   const orderedFields = useMemo(() => {
     const byKey = new Map(fields.map((f) => [f.key, f]));
@@ -866,7 +1169,7 @@ const colFindRef = useRef(null);
       ),
     };
 
-       const dataCols = orderedFields
+    const dataCols = orderedFields
       .filter((field) => visibleKeys.includes(field.key))
       .map((field) => {
         const sticky =
@@ -892,7 +1195,7 @@ const colFindRef = useRef(null);
     const stickyCols = dataCols.filter((c) => c.frozen);
     const otherCols = dataCols.filter((c) => !c.frozen);
 
-    return [selectCol, rowNumber, ...stickyCols, ...otherCols ];
+    return [selectCol, rowNumber, ...stickyCols, ...otherCols];
   }, [
     orderedFields,
     visibleKeys,
@@ -900,54 +1203,57 @@ const colFindRef = useRef(null);
     resource,
     pagination.page,
     pagination.limit,
-     highlightKey,
+    highlightKey,
   ]);
 
-const colMatches = useMemo(() => {
-  const q = colQuery.trim().toLowerCase();
-  if (!q) return [];
-  return orderedFields
-    .filter((f) => f.name.toLowerCase().includes(q))
-    .slice(0, 12);
-}, [colQuery, orderedFields]);
+  const colMatches = useMemo(() => {
+    const q = colQuery.trim().toLowerCase();
+    if (!q) return [];
+    return orderedFields
+      .filter((f) => f.name.toLowerCase().includes(q))
+      .slice(0, 12);
+  }, [colQuery, orderedFields]);
 
-useEffect(() => {
-  const onDown = (e) => {
-    if (colFindRef.current && !colFindRef.current.contains(e.target)) {
-      setColMenuOpen(false);
-    }
+  useEffect(() => {
+    const onDown = (e) => {
+      if (colFindRef.current && !colFindRef.current.contains(e.target)) {
+        setColMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+  const goToColumn = (key) => {
+    const field = fields.find((f) => f.key === key);
+    if (!field) return;
+    if (!visibleKeys.includes(key)) setVisibleKeys((c) => [...c, key]);
+    setHighlightKey(key);
+    setPendingScroll(key);
+    setColQuery(field.name);
+    setColMenuOpen(false);
   };
-  document.addEventListener("mousedown", onDown);
-  return () => document.removeEventListener("mousedown", onDown);
-}, []);
-const goToColumn = (key) => {
-  const field = fields.find((f) => f.key === key);
-  if (!field) return;
-  if (!visibleKeys.includes(key)) setVisibleKeys((c) => [...c, key]);
-  setHighlightKey(key);
-  setPendingScroll(key);
-  setColQuery(field.name);
-  setColMenuOpen(false);
-};
 
-// Scroll after the columns array has been rebuilt (a hidden column may have just been shown).
-useEffect(() => {
-  if (!pendingScroll) return;
-  const idx = columns.findIndex((c) => c.key === pendingScroll);
-  if (idx < 0) return;
+  // Scroll after the columns array has been rebuilt (a hidden column may have just been shown).
+  useEffect(() => {
+    if (!pendingScroll) return;
+    const idx = columns.findIndex((c) => c.key === pendingScroll);
+    if (idx < 0) return;
 
-  const widthOf = (c) => (typeof c.width === "number" ? c.width : 220);
-  const frozenWidth = columns
-    .filter((c) => c.frozen)
-    .reduce((sum, c) => sum + widthOf(c), 0);
-  const left = columns.slice(0, idx).reduce((sum, c) => sum + widthOf(c), 0);
+    const widthOf = (c) => (typeof c.width === "number" ? c.width : 220);
+    const frozenWidth = columns
+      .filter((c) => c.frozen)
+      .reduce((sum, c) => sum + widthOf(c), 0);
+    const left = columns.slice(0, idx).reduce((sum, c) => sum + widthOf(c), 0);
 
-  const grid = gridWrapRef.current?.querySelector(".rdg");
-  if (grid && !columns[idx].frozen) {
-    grid.scrollTo({ left: Math.max(0, left - frozenWidth - 8), behavior: "smooth" });
-  }
-  setPendingScroll(null);
-}, [pendingScroll, columns]);
+    const grid = gridWrapRef.current?.querySelector(".rdg");
+    if (grid && !columns[idx].frozen) {
+      grid.scrollTo({
+        left: Math.max(0, left - frozenWidth - 8),
+        behavior: "smooth",
+      });
+    }
+    setPendingScroll(null);
+  }, [pendingScroll, columns]);
   const clearSelection = useCallback(() => {
     selectedCache.current.clear();
     setSelectedRows(new Set());
@@ -983,7 +1289,31 @@ useEffect(() => {
     }
     setSelectedRows(finalSet);
   };
+  const toggleCardSelect = (row) => {
+    const next = new Set(selectedRows);
+    if (next.has(row._id)) next.delete(row._id);
+    else next.add(row._id);
+    handleSelectedRowsChange(next);
+  };
 
+  const selectableCards = resource === "prospect" && canEdit;
+  const pageIds = rows.map((r) => r._id);
+  const allOnPage =
+    pageIds.length > 0 && pageIds.every((id) => selectedRows.has(id));
+  const someOnPage = pageIds.some((id) => selectedRows.has(id));
+
+  const toggleSelectAllCards = () => {
+    const next = new Set(selectedRows);
+    if (allOnPage) pageIds.forEach((id) => next.delete(id));
+    else pageIds.forEach((id) => next.add(id));
+    handleSelectedRowsChange(next); // keeps the MAX_SELECT limit and the row cache working
+  };
+  const changeView = (next) => {
+    if (next === view) return;
+    setView(next);
+    setLimit(next === "card" ? 12 : 25); // card grids look best in multiples of 3/4
+    setPage(1);
+  };
   // Full records of the selected rows
   const getSelectedRecords = () =>
     Array.from(selectedRows)
@@ -994,95 +1324,128 @@ useEffect(() => {
   }, [resource, search, effectiveFilters, clearSelection]);
 
   const reloadCurrentPage = () =>
-  dispatch(
-    fetchRows({
-      resource,
-      page,
-      limit,
-      search,
-      sortBy,
-      sortOrder,
-      filters: effectiveFilters,
-    }),
-  );
-
-const updateLinkedinProfiles = async () => {
-  const records = getSelectedRecords();
-  if (!records.length) return;
-
-  setLinkedinBusy(true);
-  setLinkedinStatus("Starting...");
-  setLinkedinJob({
-    state: "running",
-    total: records.length,
-    processed: 0,
-    current: "",
-    results: [],
-    error: null,
-  });
-
-  try {
-    const started = await updateLinkedinProfilesApi(resource, records);
-    const jobId = started.jobId ?? started.job_id;
-    if (!jobId) throw new Error("No job id returned.");
-
-    clearSelection();
-
-    let last = null;
-    let seen = 0;
-    for (;;) {
-      await new Promise((r) => setTimeout(r, 1500));
-      const s = await getLinkedinUpdateStatusApi(jobId);
-      const results = Array.isArray(s.results) ? s.results : [];
-
-      setLinkedinJob({ ...s, results });
-      setLinkedinStatus(`Updating... ${s.processed ?? 0}/${s.total ?? records.length}`);
-
-      // A new profile finished: reload the grid now, don't wait for the rest.
-      if (results.length > seen) {
-        seen = results.length;
-        reloadCurrentPage();
-      }
-
-      if (s.state === "failed") throw new Error(s.error || "LinkedIn update failed");
-      if (s.state === "done" || s.state === "stopped") {
-        last = s;
-        break;
-      }
-    }
-
-    const results = Array.isArray(last?.results) ? last.results : [];
-    const notUpdated = results.filter(
-      (r) => r.status === "skipped" || r.status === "failed",
-    ).length;
-    const updated = results.length - notUpdated;
-
-    if (last?.state === "stopped") {
-      showToast(
-        `${last.error || "LinkedIn update stopped early."} (${updated} updated, ${notUpdated} skipped or failed)`,
-        "warning",
-        9000,
-      );
-    } else if (results.length && notUpdated === results.length) {
-      showToast(`No profiles were updated. ${notUpdated} record(s) were skipped or failed.`, "warning", 7000);
-    } else if (results.length && notUpdated > 0) {
-      showToast(`LinkedIn update finished: ${updated} updated, ${notUpdated} skipped or failed.`, "info", 7000);
-    } else {
-      showToast(`LinkedIn profiles updated for ${records.length} record(s).`, "success");
-    }
-  } catch (err) {
-    setLinkedinJob((j) => (j ? { ...j, state: "failed", error: err.message } : j));
-    reloadCurrentPage();
-    showToast(
-      err?.response?.data?.message || err.message || "Could not update LinkedIn profiles.",
-      "error",
-      7000,
+    dispatch(
+      fetchRows({
+        resource,
+        page,
+        limit,
+        search,
+        sortBy,
+        sortOrder,
+        filters: effectiveFilters,
+      }),
     );
-  } finally {
-    setLinkedinBusy(false);
-    setLinkedinStatus("");
-  }
-};
+
+  const updateLinkedinProfiles = async () => {
+    const records = getSelectedRecords();
+    if (!records.length) return;
+setLinkedinQueue(
+  records.map((r) => ({
+    id: String(r._id),
+    name:
+      [r.firstName, r.lastName].filter(Boolean).join(" ") ||
+      r.employeeName ||
+      "—",
+  })),
+);
+    setLinkedinBusy(true);
+    setLinkedinStatus("Starting...");
+  setLinkedinJob({
+  state: "running",
+  total: records.length,
+  processed: 0,
+  current: "",
+  results: [],
+  error: null,
+  queue: records.map((r) => ({
+    id: String(r._id),
+    name:
+      [r.firstName, r.lastName].filter(Boolean).join(" ") ||
+      r.employeeName ||
+      "—",
+  })),
+});
+
+    try {
+      const started = await updateLinkedinProfilesApi(resource, records);
+      const jobId = started.jobId ?? started.job_id;
+      if (!jobId) throw new Error("No job id returned.");
+
+      clearSelection();
+
+      let last = null;
+      let seen = 0;
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const s = await getLinkedinUpdateStatusApi(jobId);
+        const results = Array.isArray(s.results) ? s.results : [];
+
+      setLinkedinJob((j) => ({ ...s, results, queue: j?.queue ?? [] }));
+        setLinkedinStatus(
+          `Updating... ${s.processed ?? 0}/${s.total ?? records.length}`,
+        );
+
+        // A new profile finished: reload the grid now, don't wait for the rest.
+        if (results.length > seen) {
+          seen = results.length;
+          reloadCurrentPage();
+        }
+
+        if (s.state === "failed")
+          throw new Error(s.error || "LinkedIn update failed");
+        if (s.state === "done" || s.state === "stopped") {
+          last = s;
+          break;
+        }
+      }
+
+      const results = Array.isArray(last?.results) ? last.results : [];
+      const notUpdated = results.filter(
+        (r) => r.status === "skipped" || r.status === "failed",
+      ).length;
+      const updated = results.length - notUpdated;
+
+      if (last?.state === "stopped") {
+        showToast(
+          `${last.error || "LinkedIn update stopped early."} (${updated} updated, ${notUpdated} skipped or failed)`,
+          "warning",
+          9000,
+        );
+      } else if (results.length && notUpdated === results.length) {
+        showToast(
+          `No profiles were updated. ${notUpdated} record(s) were skipped or failed.`,
+          "warning",
+          7000,
+        );
+      } else if (results.length && notUpdated > 0) {
+        showToast(
+          `LinkedIn update finished: ${updated} updated, ${notUpdated} skipped or failed.`,
+          "info",
+          7000,
+        );
+      } else {
+        showToast(
+          `LinkedIn profiles updated for ${records.length} record(s).`,
+          "success",
+        );
+      }
+    } catch (err) {
+      setLinkedinJob((j) =>
+        j ? { ...j, state: "failed", error: err.message } : j,
+      );
+      reloadCurrentPage();
+      showToast(
+        err?.response?.data?.message ||
+          err.message ||
+          "Could not update LinkedIn profiles.",
+        "error",
+        7000,
+      );
+    } finally {
+      setLinkedinBusy(false);
+      setLinkedinStatus("");
+    }
+  };
 
   const onRowsChange = (newRows, { indexes }) => {
     indexes.forEach((index) => {
@@ -1201,6 +1564,9 @@ const updateLinkedinProfiles = async () => {
     setSearchInput("");
     setSortColumns([]);
   };
+const sortChanged =
+  JSON.stringify(sortColumns) !== JSON.stringify(defaultSort);
+
 
   const activeCount =
     Object.keys(filters).length +
@@ -1293,83 +1659,128 @@ const updateLinkedinProfiles = async () => {
           />
         )}
       </div>
-{linkedinJob && (
-  <div className="dgp-card" style={{ padding: 16 }}>
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-      <strong>
-        LinkedIn update: {linkedinJob.processed ?? 0}/{linkedinJob.total}
-        {linkedinJob.state === "done" && " ✓ finished"}
-        {linkedinJob.state === "stopped" && " (stopped)"}
-        {linkedinJob.state === "failed" && " (failed)"}
-      </strong>
-      {!linkedinBusy && (
-        <button type="button" className="dgp-btn dgp-btn-sm" onClick={() => setLinkedinJob(null)}>
-          Close
-        </button>
-      )}
-    </div>
-
-    <div style={{ height: 8, background: "#e5e7eb", borderRadius: 4, overflow: "hidden", marginBottom: 12 }}>
-      <div
-        style={{
-          width: `${linkedinJob.total ? ((linkedinJob.processed ?? 0) / linkedinJob.total) * 100 : 0}%`,
-          height: "100%",
-          background: "#4f46e5",
-          transition: "width .3s",
-        }}
-      />
-    </div>
-
-    {linkedinJob.error && <div className="dgp-alert">{linkedinJob.error}</div>}
-
-    <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
-      <thead>
-        <tr style={{ textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>
-          <th style={{ padding: 6 }}>#</th>
-          <th style={{ padding: 6 }}>Prospect</th>
-          <th style={{ padding: 6 }}>Result</th>
-          <th style={{ padding: 6 }}>Details</th>
-        </tr>
-      </thead>
-      <tbody>
-        {linkedinJob.results.map((r, i) => (
-          <tr key={r.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
-            <td style={{ padding: 6 }}>{i + 1}</td>
-            <td style={{ padding: 6 }}>{r.name}</td>
-            <td style={{ padding: 6 }}>
-              <span
-                className={`dgp-pill dgp-pill-${
-                  r.status === "failed" ? "danger"
-                  : r.status === "skipped" ? "warning"
-                  : r.status === "disqualified" ? "danger"
-                  : "success"
-                }`}
+      {linkedinJob && (
+        <div className="dgp-card" style={{ padding: 16 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 8,
+            }}
+          >
+            <strong>
+              LinkedIn update: {linkedinJob.processed ?? 0}/{linkedinJob.total}
+              {linkedinJob.state === "done" && " ✓ finished"}
+              {linkedinJob.state === "stopped" && " (stopped)"}
+              {linkedinJob.state === "failed" && " (failed)"}
+            </strong>
+            {!linkedinBusy && (
+              <button
+                type="button"
+                className="dgp-btn dgp-btn-sm"
+                onClick={() => setLinkedinJob(null)}
               >
-                {r.status}
-              </span>
-            </td>
-            <td style={{ padding: 6 }}>
-              {r.summary || (typeof r.detail === "string" ? r.detail : "")}
-            </td>
-          </tr>
-        ))}
-        {linkedinJob.state === "running" && linkedinJob.current && (
-          <tr>
-            <td style={{ padding: 6 }}>{linkedinJob.results.length + 1}</td>
-            <td style={{ padding: 6 }}>{linkedinJob.current}</td>
-            <td style={{ padding: 6 }} colSpan={2}>Updating...</td>
-          </tr>
-        )}
-      </tbody>
-    </table>
-    {linkedinJob.state === "running" &&
-      linkedinJob.total - linkedinJob.results.length - (linkedinJob.current ? 1 : 0) > 0 && (
-        <div className="dgp-muted" style={{ marginTop: 8 }}>
-          {linkedinJob.total - linkedinJob.results.length - (linkedinJob.current ? 1 : 0)} waiting
+                Close
+              </button>
+            )}
+          </div>
+
+          <div
+            style={{
+              height: 8,
+              background: "#e5e7eb",
+              borderRadius: 4,
+              overflow: "hidden",
+              marginBottom: 12,
+            }}
+          >
+            <div
+              style={{
+                width: `${linkedinJob.total ? ((linkedinJob.processed ?? 0) / linkedinJob.total) * 100 : 0}%`,
+                height: "100%",
+                background: "#4f46e5",
+                transition: "width .3s",
+              }}
+            />
+          </div>
+
+          {linkedinJob.error && (
+            <div className="dgp-alert">{linkedinJob.error}</div>
+          )}
+
+          <table
+            style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}
+          >
+            <thead>
+              <tr
+                style={{ textAlign: "left", borderBottom: "1px solid #e5e7eb" }}
+              >
+                <th style={{ padding: 6 }}>#</th>
+                <th style={{ padding: 6 }}>Prospect</th>
+                <th style={{ padding: 6 }}>Result</th>
+                <th style={{ padding: 6 }}>Details</th>
+              </tr>
+            </thead>
+      <tbody>
+  {linkedinQueue.map((q, i) => {
+    const matchFor = (item, idx) =>
+      linkedinJob.results.find((r) => String(r.id) === item.id) ??
+      linkedinJob.results[idx];
+
+    const res = matchFor(q, i);
+    const finished = ["done", "stopped", "failed"].includes(linkedinJob.state);
+    const firstOpen = linkedinQueue.findIndex((x, idx) => !matchFor(x, idx));
+    const isCurrent = !res && !finished && i === firstOpen;
+
+    let label = "Pending";
+    let color = "secondary";
+    if (res) {
+      label = res.status;
+      color =
+        res.status === "failed" || res.status === "disqualified"
+          ? "danger"
+          : res.status === "skipped"
+            ? "warning"
+            : "success";
+    } else if (isCurrent) {
+      label = "Updating...";
+      color = "warning";
+    } else if (finished) {
+      label = "Not processed";
+    }
+
+    return (
+      <tr key={q.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+        <td style={{ padding: 6 }}>{i + 1}</td>
+        <td style={{ padding: 6 }}>{res?.name || q.name}</td>
+        <td style={{ padding: 6 }}>
+          <span className={`dgp-pill dgp-pill-${color}`}>{label}</span>
+        </td>
+        <td style={{ padding: 6 }}>
+          {res
+            ? res.summary || (typeof res.detail === "string" ? res.detail : "")
+            : ""}
+        </td>
+      </tr>
+    );
+  })}
+</tbody>
+          </table>
+          {linkedinJob.state === "running" &&
+            linkedinJob.total -
+              linkedinJob.results.length -
+              (linkedinJob.current ? 1 : 0) >
+              0 && (
+              <div className="dgp-muted" style={{ marginTop: 8 }}>
+                {linkedinJob.total -
+                  linkedinJob.results.length -
+                  (linkedinJob.current ? 1 : 0)}{" "}
+                waiting
+              </div>
+            )}
         </div>
       )}
-  </div>
-)}
       <CompanyImportModal
         open={importOpen}
         onClose={() => setImportOpen(false)}
@@ -1392,81 +1803,98 @@ const updateLinkedinProfiles = async () => {
               aria-label={`Search ${title}`}
             />
           </div>
-         <div className="dgp-colfind" ref={colFindRef}>
-  <input
-    type="text"
-    className="dgp-input"
-    value={colQuery}
-    placeholder="Find column..."
-    aria-label="Find column"
-    autoComplete="off"
-    onChange={(e) => {
-      setColQuery(e.target.value);
-      setColActive(0);
-      setColMenuOpen(true);
-      if (!e.target.value) setHighlightKey(null);
-    }}
-    onFocus={() => setColMenuOpen(true)}
-    onKeyDown={(e) => {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setColMenuOpen(true);
-        setColActive((i) => Math.min(i + 1, colMatches.length - 1));
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setColActive((i) => Math.max(i - 1, 0));
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        const m = colMatches[colActive];
-        if (m) goToColumn(m.key);
-      } else if (e.key === "Escape") {
-        setColMenuOpen(false);
-        setColQuery("");
-        setHighlightKey(null);
-      }
-    }}
-  />
+          <div className="dgp-colfind" ref={colFindRef}>
+            <input
+              type="text"
+              className="dgp-input"
+              value={colQuery}
+              placeholder="Find column..."
+              aria-label="Find column"
+              autoComplete="off"
+              onChange={(e) => {
+                setColQuery(e.target.value);
+                setColActive(0);
+                setColMenuOpen(true);
+                if (!e.target.value) setHighlightKey(null);
+              }}
+              onFocus={() => setColMenuOpen(true)}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setColMenuOpen(true);
+                  setColActive((i) => Math.min(i + 1, colMatches.length - 1));
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setColActive((i) => Math.max(i - 1, 0));
+                } else if (e.key === "Enter") {
+                  e.preventDefault();
+                  const m = colMatches[colActive];
+                  if (m) goToColumn(m.key);
+                } else if (e.key === "Escape") {
+                  setColMenuOpen(false);
+                  setColQuery("");
+                  setHighlightKey(null);
+                }
+              }}
+            />
 
-  {highlightKey && (
-    <button
-      type="button"
-      className="dgp-link"
-      onClick={() => {
-        setHighlightKey(null);
-        setColQuery("");
-      }}
-    >
-      Clear
-    </button>
-  )}
+            {highlightKey && (
+              <button
+                type="button"
+                className="dgp-link"
+                onClick={() => {
+                  setHighlightKey(null);
+                  setColQuery("");
+                }}
+              >
+                Clear
+              </button>
+            )}
 
-  {colMenuOpen && colMatches.length > 0 && (
-    <div className="dgp-colfind-list" role="listbox">
-      {colMatches.map((f, i) => (
-        <button
-          key={f.key}
-          type="button"
-          role="option"
-          aria-selected={i === colActive}
-          className={`dgp-colfind-item ${i === colActive ? "active" : ""}`}
-          ref={(el) => {
-            if (el && i === colActive) el.scrollIntoView({ block: "nearest" });
-          }}
-          onMouseEnter={() => setColActive(i)}
-          onMouseDown={(e) => {
-            e.preventDefault(); // keep the input focused, select on press
-            goToColumn(f.key);
-          }}
-        >
-          {f.name}
-          {!visibleKeys.includes(f.key) && <em> (hidden)</em>}
-        </button>
-      ))}
-    </div>
-  )}
-</div>
+            {colMenuOpen && colMatches.length > 0 && (
+              <div className="dgp-colfind-list" role="listbox">
+                {colMatches.map((f, i) => (
+                  <button
+                    key={f.key}
+                    type="button"
+                    role="option"
+                    aria-selected={i === colActive}
+                    className={`dgp-colfind-item ${i === colActive ? "active" : ""}`}
+                    ref={(el) => {
+                      if (el && i === colActive)
+                        el.scrollIntoView({ block: "nearest" });
+                    }}
+                    onMouseEnter={() => setColActive(i)}
+                    onMouseDown={(e) => {
+                      e.preventDefault(); // keep the input focused, select on press
+                      goToColumn(f.key);
+                    }}
+                  >
+                    {f.name}
+                    {!visibleKeys.includes(f.key) && <em> (hidden)</em>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           <div className="dgp-tools">
+            <div className="dgp-viewtoggle" role="group" aria-label="View">
+              <button
+                type="button"
+                className={view === "card" ? "on" : ""}
+                onClick={() => changeView("card")}
+              >
+                Cards
+              </button>
+              <button
+                type="button"
+                className={view === "table" ? "on" : ""}
+                onClick={() => changeView("table")}
+              >
+                Table
+              </button>
+            </div>
             {activeCount > 0 && (
               <button type="button" className="dgp-btn" onClick={clearAll}>
                 Reset ({activeCount})
@@ -1565,29 +1993,45 @@ const updateLinkedinProfiles = async () => {
               )}
             </div>
 
-            <label className="dgp-rows">
-              Rows
-              <select
-                className="dgp-select"
-                value={limit}
-                onChange={(e) => {
-                  setLimit(Number(e.target.value));
-                  setPage(1);
-                }}
-              >
-                {[10, 25, 50, 100].map((size) => (
-                  <option key={size} value={size}>
-                    {size}
-                  </option>
-                ))}
-              </select>
-            </label>
+           {view === "card" && (
+  <label className="dgp-rows">
+    Sort
+    <select
+      className="dgp-select"
+      value={sortBy}
+      onChange={(e) =>
+        headerCtx.setSort(
+          e.target.value,
+          e.target.value ? (sortColumns[0]?.direction ?? "DESC") : null,
+        )
+      }
+    >
+      <option value="">Default</option>
+      {orderedFields.map((f) => (
+        <option key={f.key} value={f.key}>{f.name}</option>
+      ))}
+    </select>
+    <button
+      type="button"
+      className="dgp-btn dgp-btn-sm"
+      disabled={!sortBy}
+      onClick={() =>
+        headerCtx.setSort(sortBy, sortOrder === "desc" ? "ASC" : "DESC")
+      }
+    >
+      {sortOrder === "desc" ? "↓ Desc" : "↑ Asc"}
+    </button>
+  </label>
+)}
           </div>
         </div>
 
         {error && <div className="dgp-alert">{String(error)}</div>}
 
-       <div ref={gridWrapRef} className={`dgp-grid ${loading ? "is-loading" : ""}`}>
+        <div
+          ref={gridWrapRef}
+          className={`dgp-grid ${view === "card" ? "is-cards" : ""} ${loading ? "is-loading" : ""}`}
+        >
           <HeaderCtx.Provider value={headerCtx}>
             {listError && <div className="dgp-alert">{listError}</div>}
             {companyList && (
@@ -1604,19 +2048,79 @@ const updateLinkedinProfiles = async () => {
               </div>
             )}
 
-            <DataGrid
-              className="rdg-light ag-like"
-              columns={columns}
-              rows={rows}
-              rowKeyGetter={(row) => row._id}
-              selectedRows={selectedRows}
-              onSelectedRowsChange={handleSelectedRowsChange}
-              onRowsChange={onRowsChange}
-              rowHeight={42}
-              headerRowHeight={84}
-              rowClass={(_, index) => (index % 2 ? "ag-row-alt" : undefined)}
-              defaultColumnOptions={{ resizable: true }}
-            />
+            {view === "table" ? (
+              <DataGrid
+                className={`${isDark ? "rdg-dark" : "rdg-light"} ag-like`}
+                columns={columns}
+                rows={rows}
+                rowKeyGetter={(row) => row._id}
+                selectedRows={selectedRows}
+                onSelectedRowsChange={handleSelectedRowsChange}
+                onRowsChange={onRowsChange}
+                rowHeight={42}
+                headerRowHeight={84}
+                rowClass={(_, index) => (index % 2 ? "ag-row-alt" : undefined)}
+                defaultColumnOptions={{ resizable: true }}
+              />
+            ) : (
+             <>
+  {hasStatusField && !statusLocked && statusOptions.length > 0 && (
+    <div className="dgp-statusbar" role="group" aria-label="Filter by status">
+      <button
+        type="button"
+        className={`dgp-chipbtn ${activeStatus === "" ? "on" : ""}`}
+        onClick={() => pickStatus("")}
+      >
+        All
+      </button>
+      {statusOptions.map((s) => (
+        <button
+          key={s}
+          type="button"
+          className={`dgp-chipbtn ${activeStatus === String(s) ? "on" : ""}`}
+          onClick={() => pickStatus(String(s))}
+        >
+          {s}
+        </button>
+      ))}
+    </div>
+  )}
+
+  {selectableCards && rows.length > 0 && (
+    <div className="dgp-cards-bar">
+      <label className="dgp-cards-selectall">
+        <input
+          type="checkbox"
+          checked={allOnPage}
+          ref={(el) => {
+            if (el) el.indeterminate = someOnPage && !allOnPage;
+          }}
+          onChange={toggleSelectAllCards}
+        />
+        <span>Select all on this page ({rows.length})</span>
+      </label>
+      {selectedRows.size > 0 && (
+        <span className="dgp-muted">{selectedRows.size} selected</span>
+      )}
+    </div>
+  )}
+
+  <div className="dgp-cards">
+    {rows.map((row) => (
+      <RecordCard
+        key={row._id}
+        row={row}
+        cfg={cardCfg}
+        fieldMap={fieldMap}
+        selectable={selectableCards}
+        selected={selectedRows.has(row._id)}
+        onToggle={() => toggleCardSelect(row)}
+        onMore={() => setDetailRow(row)}
+      />
+    ))}
+  </div>
+</>
+            )}
           </HeaderCtx.Provider>
 
           {loading && (
@@ -1639,45 +2143,54 @@ const updateLinkedinProfiles = async () => {
             of {pagination.total.toLocaleString()}
           </span>
 
-          <div className="dgp-pager">
+          <nav className="dgp-pager" aria-label="Pagination">
             <button
               type="button"
-              className="dgp-btn dgp-btn-sm"
-              disabled={!pagination.hasPrevPage || loading}
-              onClick={() => setPage(1)}
-            >
-              «
-            </button>
-            <button
-              type="button"
-              className="dgp-btn dgp-btn-sm"
+              className="dgp-pg"
               disabled={!pagination.hasPrevPage || loading}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
             >
-              Previous
+              ‹ Prev
             </button>
-            <span className="dgp-page">
-              Page {pagination.page} of {totalPages}
-            </span>
+
+            {pageList(pagination.page, totalPages).map((n, i) =>
+              n === "…" ? (
+                <span key={`gap-${i}`} className="dgp-pg-gap">
+                  …
+                </span>
+              ) : (
+                <button
+                  key={n}
+                  type="button"
+                  className={`dgp-pg ${n === pagination.page ? "on" : ""}`}
+                  aria-current={n === pagination.page ? "page" : undefined}
+                  disabled={loading}
+                  onClick={() => setPage(n)}
+                >
+                  {n}
+                </button>
+              ),
+            )}
+
             <button
               type="button"
-              className="dgp-btn dgp-btn-sm"
+              className="dgp-pg"
               disabled={!pagination.hasNextPage || loading}
               onClick={() => setPage((p) => p + 1)}
             >
-              Next
+              Next ›
             </button>
-            <button
-              type="button"
-              className="dgp-btn dgp-btn-sm"
-              disabled={!pagination.hasNextPage || loading}
-              onClick={() => setPage(totalPages)}
-            >
-              »
-            </button>
-          </div>
+          </nav>
         </div>
       </div>
+      {detailRow && (
+        <RecordModal
+          row={detailRow}
+          cfg={cardCfg}
+          fields={orderedFields}
+          onClose={() => setDetailRow(null)}
+        />
+      )}
     </section>
   );
 }

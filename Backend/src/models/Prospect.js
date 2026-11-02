@@ -87,6 +87,7 @@ linkedinAbout: {
     trim: true,
     default: 'Qualified',
   },
+  profilePhotoUrl: { type: String, trim: true, default: '' },
       primaryReason: { type: String, trim: true, default: '' },
       qaComment: { type: String, trim: true, default: '' },
       ebbStatus: { type: String, trim: true, default: '' },

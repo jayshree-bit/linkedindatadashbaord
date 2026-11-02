@@ -126,6 +126,12 @@ const companyListCondition = (resource, model) => {
   return or.length ? { $or: or } : { _id: { $exists: false } };
 };
 
+/* Special filter key `updatedAtRange` (prospects only): { from, to } as "YYYY-MM-DD".
+   Both ends inclusive, IST day boundaries (same parseRange the dashboard uses). */
+const updatedRangeCondition = (model) => {
+  const range = parseRange({ from: model?.from, to: model?.to }); // throws 400 on bad dates
+  return Object.keys(range).length ? { updatedAt: range } : null;
+};
 
 const parseFilters = (resource, raw) => {
   if (!raw) return [];
@@ -154,7 +160,12 @@ const parseFilters = (resource, raw) => {
       conditions.push(companyListCondition(resource, model));
       continue;
     }
-
+    // Updated At date range (From / To)
+    if (resource === 'prospect' && gridKey === 'updatedAtRange') {
+      const cond = updatedRangeCondition(model);
+      if (cond) conditions.push(cond);
+      continue;
+    }
     const field = resolveField(resource, gridKey);
     if (!isSafeKey(field)) continue;
 

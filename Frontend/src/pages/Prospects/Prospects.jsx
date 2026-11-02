@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import DataGridPage from '../../components/DataGridPage';
-
+import DateRangeFilter from '../../components/DateRangeFilter';
 const fields = [
   { key: 'employeeCode', name: 'Employee Code' },
   { key: 'employeeName', name: 'Employee Name' },
@@ -50,27 +50,60 @@ const fields = [
   { key: 'auditorName', name: 'Auditor Name' },
   { key: 'auditDate', name: 'Audit Date' },
   { key: 'uploadedByName', name: 'Uploaded By' },
+  {key:'updatedAt', name:'Updated At'},
 ];
-
+const UPDATE_MARK = 'Update Profile'; // the script writes this into note1
+const cardConfig = {
+  title: (r) =>
+    [r.firstName, r.lastName].filter(Boolean).join(' ') || r.employeeName || '—',
+  subtitle: (r) => [r.specificTitle, r.companyName].filter(Boolean).join(' · '),
+  badgeKey: 'status',
+  items: [
+    'emailAddress',
+    'phoneNumber',
+    'linkedinProfileLink',
+    'city',
+    'country',
+    'campaign',
+    'employeeName',
+  ],
+};
 export default function Prospects() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const statusFilter = searchParams.get('status') || '';
   const userId = searchParams.get('userId') || '';
   const employee = searchParams.get('employee') || '';
+  const tab = searchParams.get('tab') || 'all'; // all | updated | pending
+  const fromDate = searchParams.get('from') || '';
+  const toDate = searchParams.get('to') || '';
 
-  // Locked filters coming from the dashboard link.
-  // `userId` is a special key: the backend turns it into the same condition
-  // the dashboard stats use for that user.
+  const setParam = (name, value) => {
+    const params = new URLSearchParams(searchParams);
+    if (value) params.set(name, value);
+    else params.delete(name);
+    setSearchParams(params);
+  };
+
+  const setTab = (next) => setParam('tab', next === 'all' ? '' : next);
+
+  // The date range only makes sense on All and Updated.
+  const dateEnabled = tab !== 'pending';
+  const rangeInvalid = Boolean(fromDate && toDate && fromDate > toDate);
+
   const fixedFilters = useMemo(() => {
     const f = {};
-    if (statusFilter) {
-      f.status = { op: 'equals', text: statusFilter, values: null };
+    if (statusFilter) f.status = { op: 'equals', text: statusFilter, values: null };
+    if (userId) f.userId = { op: 'equals', text: userId, values: null };
+    if (tab === 'updated') {
+      f.note1 = { op: 'contains', text: UPDATE_MARK, values: null };
+    } else if (tab === 'pending') {
+      f.note1 = { op: 'notContains', text: UPDATE_MARK, values: null };
     }
-    if (userId) {
-      f.userId = { op: 'equals', text: userId, values: null };
+    if (dateEnabled && !rangeInvalid && (fromDate || toDate)) {
+      f.updatedAtRange = { from: fromDate || null, to: toDate || null };
     }
     return f;
-  }, [statusFilter, userId]);
+  }, [statusFilter, userId, tab, dateEnabled, rangeInvalid, fromDate, toDate]);
 
   const baseTitle =
     statusFilter === 'Qualified'
@@ -79,12 +112,50 @@ export default function Prospects() {
         ? 'Disqualified Prospects'
         : 'All Prospects';
 
+  const tabLabel =
+    tab === 'updated' ? ' (Updated)' : tab === 'pending' ? ' (Not updated)' : '';
+   const setRange = ({ from, to }) => {
+    const params = new URLSearchParams(searchParams);
+    if (from) params.set('from', from);
+    else params.delete('from');
+    if (to) params.set('to', to);
+    else params.delete('to');
+    setSearchParams(params);
+  };
+const DEFAULT_SORT = [{ columnKey: 'updatedAt', direction: 'DESC' }];
   return (
-    <DataGridPage
-      resource="prospect"
-      title={employee ? `${baseTitle} – ${employee}` : baseTitle}
-      fields={fields}
-      fixedFilters={fixedFilters}
-    />
+    <>
+      <div className="dgp-tabs" role="tablist">
+        {[
+          ['all', 'All'],
+          ['updated', 'Updated'],
+          ['pending', 'Not updated'],
+        ].map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            className={`dgp-tab ${tab === id ? 'on' : ''}`}
+            onClick={() => setTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {dateEnabled && (
+        <DateRangeFilter from={fromDate} to={toDate} onChange={setRange} />
+      )}
+
+      <DataGridPage
+        resource="prospect"
+        title={`${employee ? `${baseTitle} – ${employee}` : baseTitle}${tabLabel}`}
+        fields={fields}
+        fixedFilters={fixedFilters}
+        cardConfig={cardConfig}
+         defaultSort={DEFAULT_SORT}
+      />
+    </>
   );
 }

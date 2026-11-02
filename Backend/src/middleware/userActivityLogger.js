@@ -27,7 +27,7 @@ export const userActivityLogger = (req, res, next) => {
   res.on("finish", () => {
     // Record only successful responses.
     if (res.statusCode < 200 || res.statusCode >= 300) return;
-
+    if (req.originalUrl.toLowerCase().includes("update-linkedin")) return;
     const path = req.baseUrl + req.path;
     const action = getAction(req.method, path);
 
