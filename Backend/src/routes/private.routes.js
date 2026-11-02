@@ -8,6 +8,7 @@ import { importCompaniesExcel, getCompanyImportStatus } from '../controllers/com
 import { getUserActivities } from "../controllers/userActivity.controller.js";
 import { userActivityLogger } from "../middleware/userActivityLogger.js";
 
+
 const r = Router();
 r.use(authenticate);
 r.use(userActivityLogger);
@@ -57,7 +58,8 @@ r.get(
   authorize("prospect", "view"),
   getDashboard
 );
-
+r.post("/:resource/update-linkedin",authorize("prospect", "view"), data.updateLinkedinProfiles);
+r.get("/update-linkedin/:jobId", authorize("prospect", "view"),data.linkedinUpdateStatus);
 const excelUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 },

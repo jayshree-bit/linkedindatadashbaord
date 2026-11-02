@@ -670,3 +670,109 @@
   }
 }
 
+/* centered checkbox + Sr. No. cells */
+.dgp .rdg-cell.dgp-center-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 0;
+  text-align: center;
+}
+.dgp .rdg-cell.dgp-center-cell .rdg-checkbox-label {
+  position: static;
+  margin: 0;
+}
+.dgp .agh-index {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-weight: 600;
+}
+
+/* sticky columns keep a solid background so scrolled cells don't show through */
+.dgp .rdg-cell-frozen {
+  background: #fff;
+}
+.dgp .ag-row-alt .rdg-cell-frozen {
+  background: #f8f9fa; /* match your .ag-row-alt colour */
+}
+/* Frozen (sticky) cells must have their own opaque, theme-aware background */
+.dgp {
+  --dgp-frozen-bg: #ffffff;
+  --dgp-frozen-bg-alt: #f8fafc;
+  --dgp-frozen-text: #111827;
+  --dgp-frozen-muted: #6b7280;
+}
+
+html.dark .dgp,
+.dark .dgp,
+[data-theme="dark"] .dgp,
+body.dark .dgp {
+  --dgp-frozen-bg: #0b1220;
+  --dgp-frozen-bg-alt: #0f172a;
+  --dgp-frozen-text: #e5e7eb;
+  --dgp-frozen-muted: #9ca3af;
+}
+
+.dgp .rdg-row .rdg-cell-frozen {
+  background-color: var(--dgp-frozen-bg) !important;
+  color: var(--dgp-frozen-text) !important;
+}
+
+.dgp .rdg-row.ag-row-alt .rdg-cell-frozen {
+  background-color: var(--dgp-frozen-bg-alt) !important;
+}
+
+.dgp .rdg-row .rdg-cell-frozen .text-muted {
+  color: var(--dgp-frozen-muted) !important;
+}
+.dgp-colfind {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 200px;
+}
+
+.dgp-colfind-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 60;
+  min-width: 220px;
+  max-height: 280px;
+  z-index: 1000;
+  overflow-y: auto;
+  background: var(--dgp-frozen-bg, #fff);
+  color: var(--dgp-frozen-text, #111827);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+.dgp-colfind-item:hover,
+.dgp-colfind-item.active {
+  background: rgba(99, 102, 241, 0.25);
+}
+.dgp-colfind-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  text-align: left;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+}
+.dgp-colfind-item:hover { background: rgba(99, 102, 241, 0.15); }
+.dgp-colfind-item em { opacity: 0.6; font-size: 12px; }
+
+/* highlighted column */
+.dgp .rdg-row .rdg-cell.dgp-col-hl {
+  background-color: rgba(250, 204, 21, 0.18) !important;
+  box-shadow: inset 2px 0 0 #facc15, inset -2px 0 0 #facc15;
+}
+.dgp .rdg-header-row .rdg-cell.dgp-col-hl-head {
+  background-color: rgba(250, 204, 21, 0.35) !important;
+  box-shadow: inset 0 3px 0 #facc15;
+}

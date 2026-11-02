@@ -27,6 +27,7 @@ import {
   exportFileApi,
   uploadCompanyListApi,
   updateLinkedinProfilesApi,
+  getLinkedinUpdateStatusApi,
 } from "../services/dataService";
 import "./DataGridPage.css";
 import ImportExcelModal from "./ImportExcelModal";
@@ -52,6 +53,79 @@ const sameValue = (a, b) => (isBlankValue(a) && isBlankValue(b)) || a === b;
 const labelOf = (v) => (isBlankValue(v) ? "(Blanks)" : String(v));
 const isAdvanced = (m) =>
   Boolean(m) && (m.values != null || (m.op && m.op !== "contains"));
+const MAX_SELECT = 1000;
+
+// Columns that stay pinned on the left for the prospect grid.
+// Compared after lowercasing and removing spaces/symbols.
+const STICKY_NAME_KEYS = new Set(["employeename", "name"]);
+const normKey = (k) => String(k).toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/* ---------- Toaster (no extra package needed) ---------- */
+
+const TOAST_COLORS = {
+  success: "#16a34a",
+  error: "#dc2626",
+  warning: "#d97706",
+  info: "#2563eb",
+};
+
+function Toaster({ toasts, onClose }) {
+  if (!toasts.length) return null;
+  return createPortal(
+    <div
+      role="region"
+      aria-live="polite"
+      style={{
+        position: "fixed",
+        top: 16,
+        right: 16,
+        zIndex: 10000,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        maxWidth: 380,
+      }}
+    >
+      {toasts.map((t) => (
+        <div
+          key={t.id}
+          role="alert"
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 10,
+            padding: "10px 12px",
+            background: "#ffffff",
+            color: "#111827",
+            fontSize: 14,
+            lineHeight: 1.4,
+            borderRadius: 6,
+            borderLeft: `4px solid ${TOAST_COLORS[t.type] ?? TOAST_COLORS.info}`,
+            boxShadow: "0 4px 14px rgba(0, 0, 0, 0.18)",
+          }}
+        >
+          <span style={{ flex: 1 }}>{t.message}</span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={() => onClose(t.id)}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: 18,
+              lineHeight: 1,
+              color: "#6b7280",
+            }}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+    </div>,
+    document.body,
+  );
+}
 
 /* ---------- Header (AG Grid style: title + sort icon + menu, then filter box) ---------- */
 
@@ -582,6 +656,34 @@ export default function DataGridPage({
   const [linkedinBusy, setLinkedinBusy] = useState(false);
   // Column filters typed by the user + locked filters from the URL (locked ones win).
   const fixedKey = JSON.stringify(fixedFilters);
+  const [linkedinStatus, setLinkedinStatus] = useState("");
+  const [linkedinJob, setLinkedinJob] = useState(null);
+  /* ---- Toasts ---- */
+  const [toasts, setToasts] = useState([]);
+  const toastId = useRef(0);
+
+  const [colQuery, setColQuery] = useState("");
+const [colMenuOpen, setColMenuOpen] = useState(false);
+const [highlightKey, setHighlightKey] = useState(null);
+const [pendingScroll, setPendingScroll] = useState(null);
+const gridWrapRef = useRef(null);
+const [colActive, setColActive] = useState(0);
+const colFindRef = useRef(null);
+  const dismissToast = useCallback(
+    (id) => setToasts((current) => current.filter((t) => t.id !== id)),
+    [],
+  );
+
+  // type: "success" | "error" | "warning" | "info"
+  const showToast = useCallback(
+    (message, type = "info", duration = 4500) => {
+      const id = ++toastId.current;
+      setToasts((current) => [...current.slice(-3), { id, message, type }]);
+      setTimeout(() => dismissToast(id), duration);
+    },
+    [dismissToast],
+  );
+
   const effectiveFilters = useMemo(
     () => ({
       ...filters,
@@ -736,51 +838,150 @@ export default function DataGridPage({
   const columns = useMemo(() => {
     const offset = (pagination.page - 1) * pagination.limit;
 
+    const selectCol = {
+      ...SelectColumn,
+      width: 48,
+      minWidth: 48,
+      maxWidth: 48,
+      resizable: false,
+      frozen: true,
+      cellClass: "dgp-center-cell",
+      headerCellClass: "dgp-center-cell",
+    };
+
     const rowNumber = {
       key: "__index",
-      name: "#",
-      width: 64,
+      name: "Sr. No.",
+      width: 80,
+      minWidth: 80,
+      maxWidth: 80,
       frozen: true,
       resizable: false,
       sortable: false,
-      renderHeaderCell: () => <div className="agh agh-index" />,
+      cellClass: "dgp-center-cell",
+      headerCellClass: "dgp-center-cell",
+      renderHeaderCell: () => <div className="agh agh-index">Sr. No.</div>,
       renderCell: ({ rowIdx }) => (
         <span className="text-muted">{offset + rowIdx + 1}</span>
       ),
     };
 
-    const dataCols = orderedFields
+       const dataCols = orderedFields
       .filter((field) => visibleKeys.includes(field.key))
-      .map((field) => ({
-        key: field.key,
-        name: field.name,
-        minWidth: 180,
-        width: 220,
-        resizable: true,
-        sortable: false,
-        renderHeaderCell: (props) => <HeaderCell {...props} />,
-        renderCell: renderFor(field.key),
-        renderEditCell: canEdit ? textEditor : undefined,
-      }));
+      .map((field) => {
+        const sticky =
+          resource === "prospect" && STICKY_NAME_KEYS.has(normKey(field.key));
+        return {
+          key: field.key,
+          name: field.name,
+          minWidth: 180,
+          width: sticky ? 200 : 220,
+          frozen: sticky,
+          resizable: true,
+          sortable: false,
+          cellClass: field.key === highlightKey ? "dgp-col-hl" : undefined,
+          headerCellClass:
+            field.key === highlightKey ? "dgp-col-hl-head" : undefined,
+          renderHeaderCell: (props) => <HeaderCell {...props} />,
+          renderCell: renderFor(field.key),
+          renderEditCell: canEdit ? textEditor : undefined,
+        };
+      });
 
-    return [SelectColumn, rowNumber, ...dataCols];
-  }, [orderedFields, visibleKeys, canEdit, pagination.page, pagination.limit]);
+    // frozen columns must come first in the array
+    const stickyCols = dataCols.filter((c) => c.frozen);
+    const otherCols = dataCols.filter((c) => !c.frozen);
 
+    return [selectCol, rowNumber, ...stickyCols, ...otherCols ];
+  }, [
+    orderedFields,
+    visibleKeys,
+    canEdit,
+    resource,
+    pagination.page,
+    pagination.limit,
+     highlightKey,
+  ]);
+
+const colMatches = useMemo(() => {
+  const q = colQuery.trim().toLowerCase();
+  if (!q) return [];
+  return orderedFields
+    .filter((f) => f.name.toLowerCase().includes(q))
+    .slice(0, 12);
+}, [colQuery, orderedFields]);
+
+useEffect(() => {
+  const onDown = (e) => {
+    if (colFindRef.current && !colFindRef.current.contains(e.target)) {
+      setColMenuOpen(false);
+    }
+  };
+  document.addEventListener("mousedown", onDown);
+  return () => document.removeEventListener("mousedown", onDown);
+}, []);
+const goToColumn = (key) => {
+  const field = fields.find((f) => f.key === key);
+  if (!field) return;
+  if (!visibleKeys.includes(key)) setVisibleKeys((c) => [...c, key]);
+  setHighlightKey(key);
+  setPendingScroll(key);
+  setColQuery(field.name);
+  setColMenuOpen(false);
+};
+
+// Scroll after the columns array has been rebuilt (a hidden column may have just been shown).
+useEffect(() => {
+  if (!pendingScroll) return;
+  const idx = columns.findIndex((c) => c.key === pendingScroll);
+  if (idx < 0) return;
+
+  const widthOf = (c) => (typeof c.width === "number" ? c.width : 220);
+  const frozenWidth = columns
+    .filter((c) => c.frozen)
+    .reduce((sum, c) => sum + widthOf(c), 0);
+  const left = columns.slice(0, idx).reduce((sum, c) => sum + widthOf(c), 0);
+
+  const grid = gridWrapRef.current?.querySelector(".rdg");
+  if (grid && !columns[idx].frozen) {
+    grid.scrollTo({ left: Math.max(0, left - frozenWidth - 8), behavior: "smooth" });
+  }
+  setPendingScroll(null);
+}, [pendingScroll, columns]);
   const clearSelection = useCallback(() => {
     selectedCache.current.clear();
     setSelectedRows(new Set());
   }, []);
 
   const handleSelectedRowsChange = (next) => {
+    let finalSet = next;
+
+    if (next.size > MAX_SELECT) {
+      // keep what was already selected, then fill up to the limit
+      const kept = new Set();
+      for (const id of selectedRows) {
+        if (next.has(id) && kept.size < MAX_SELECT) kept.add(id);
+      }
+      for (const id of next) {
+        if (kept.size >= MAX_SELECT) break;
+        kept.add(id);
+      }
+      finalSet = kept;
+      showToast(
+        `You can select a maximum of ${MAX_SELECT} records at a time.`,
+        "warning",
+      );
+    }
+
     // remember the full row for everything newly ticked on this page
     rows.forEach((r) => {
-      if (next.has(r._id)) selectedCache.current.set(r._id, r);
+      if (finalSet.has(r._id)) selectedCache.current.set(r._id, r);
     });
     // forget anything that was unticked
     for (const id of Array.from(selectedCache.current.keys())) {
-      if (!next.has(id)) selectedCache.current.delete(id);
+      if (!finalSet.has(id)) selectedCache.current.delete(id);
     }
-    setSelectedRows(next);
+    setSelectedRows(finalSet);
   };
 
   // Full records of the selected rows
@@ -791,26 +992,98 @@ export default function DataGridPage({
   useEffect(() => {
     clearSelection();
   }, [resource, search, effectiveFilters, clearSelection]);
-  const updateLinkedinProfiles = async () => {
-    const records = getSelectedRecords();
-    console.log("selected records >>", records); // full row objects now
-    if (!records.length) return;
 
-    setLinkedinBusy(true);
-    try {
-      await updateLinkedinProfilesApi(resource, records);
-      window.alert(
-        `LinkedIn profile update started for ${records.length} record(s).`,
-      );
-      clearSelection();
-    } catch (err) {
-      window.alert(
-        err?.response?.data?.message || "Could not update LinkedIn profiles.",
-      );
-    } finally {
-      setLinkedinBusy(false);
+  const reloadCurrentPage = () =>
+  dispatch(
+    fetchRows({
+      resource,
+      page,
+      limit,
+      search,
+      sortBy,
+      sortOrder,
+      filters: effectiveFilters,
+    }),
+  );
+
+const updateLinkedinProfiles = async () => {
+  const records = getSelectedRecords();
+  if (!records.length) return;
+
+  setLinkedinBusy(true);
+  setLinkedinStatus("Starting...");
+  setLinkedinJob({
+    state: "running",
+    total: records.length,
+    processed: 0,
+    current: "",
+    results: [],
+    error: null,
+  });
+
+  try {
+    const started = await updateLinkedinProfilesApi(resource, records);
+    const jobId = started.jobId ?? started.job_id;
+    if (!jobId) throw new Error("No job id returned.");
+
+    clearSelection();
+
+    let last = null;
+    let seen = 0;
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const s = await getLinkedinUpdateStatusApi(jobId);
+      const results = Array.isArray(s.results) ? s.results : [];
+
+      setLinkedinJob({ ...s, results });
+      setLinkedinStatus(`Updating... ${s.processed ?? 0}/${s.total ?? records.length}`);
+
+      // A new profile finished: reload the grid now, don't wait for the rest.
+      if (results.length > seen) {
+        seen = results.length;
+        reloadCurrentPage();
+      }
+
+      if (s.state === "failed") throw new Error(s.error || "LinkedIn update failed");
+      if (s.state === "done" || s.state === "stopped") {
+        last = s;
+        break;
+      }
     }
-  };
+
+    const results = Array.isArray(last?.results) ? last.results : [];
+    const notUpdated = results.filter(
+      (r) => r.status === "skipped" || r.status === "failed",
+    ).length;
+    const updated = results.length - notUpdated;
+
+    if (last?.state === "stopped") {
+      showToast(
+        `${last.error || "LinkedIn update stopped early."} (${updated} updated, ${notUpdated} skipped or failed)`,
+        "warning",
+        9000,
+      );
+    } else if (results.length && notUpdated === results.length) {
+      showToast(`No profiles were updated. ${notUpdated} record(s) were skipped or failed.`, "warning", 7000);
+    } else if (results.length && notUpdated > 0) {
+      showToast(`LinkedIn update finished: ${updated} updated, ${notUpdated} skipped or failed.`, "info", 7000);
+    } else {
+      showToast(`LinkedIn profiles updated for ${records.length} record(s).`, "success");
+    }
+  } catch (err) {
+    setLinkedinJob((j) => (j ? { ...j, state: "failed", error: err.message } : j));
+    reloadCurrentPage();
+    showToast(
+      err?.response?.data?.message || err.message || "Could not update LinkedIn profiles.",
+      "error",
+      7000,
+    );
+  } finally {
+    setLinkedinBusy(false);
+    setLinkedinStatus("");
+  }
+};
+
   const onRowsChange = (newRows, { indexes }) => {
     indexes.forEach((index) => {
       const row = newRows[index];
@@ -829,6 +1102,7 @@ export default function DataGridPage({
       dispatch(updateRow({ resource, id: row._id, changes }));
     });
   };
+
   const exportExcel = async () => {
     setExporting(true);
     setExportStatus("Preparing export...");
@@ -865,13 +1139,15 @@ export default function DataGridPage({
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
+      showToast("Export downloaded.", "success");
     } catch {
-      window.alert("Export failed. Please try again.");
+      showToast("Export failed. Please try again.", "error", 6000);
     } finally {
       setExporting(false);
       setExportStatus("");
     }
   };
+
   const onImported = () => {
     // Reload the current view (the fetch effect will not re-run if page/filters are unchanged).
     setPage(1);
@@ -941,6 +1217,8 @@ export default function DataGridPage({
 
   return (
     <section className="dgp">
+      <Toaster toasts={toasts} onClose={dismissToast} />
+
       <div className="dgp-card dgp-head">
         <div>
           <h2 className="dgp-title">{title}</h2>
@@ -987,7 +1265,7 @@ export default function DataGridPage({
               disabled={linkedinBusy}
             >
               {linkedinBusy
-                ? "Updating..."
+                ? linkedinStatus || "Updating..."
                 : `Update LinkedIn Profile (${selectedRows.size})`}
             </button>
           )}
@@ -1015,7 +1293,83 @@ export default function DataGridPage({
           />
         )}
       </div>
+{linkedinJob && (
+  <div className="dgp-card" style={{ padding: 16 }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+      <strong>
+        LinkedIn update: {linkedinJob.processed ?? 0}/{linkedinJob.total}
+        {linkedinJob.state === "done" && " ✓ finished"}
+        {linkedinJob.state === "stopped" && " (stopped)"}
+        {linkedinJob.state === "failed" && " (failed)"}
+      </strong>
+      {!linkedinBusy && (
+        <button type="button" className="dgp-btn dgp-btn-sm" onClick={() => setLinkedinJob(null)}>
+          Close
+        </button>
+      )}
+    </div>
 
+    <div style={{ height: 8, background: "#e5e7eb", borderRadius: 4, overflow: "hidden", marginBottom: 12 }}>
+      <div
+        style={{
+          width: `${linkedinJob.total ? ((linkedinJob.processed ?? 0) / linkedinJob.total) * 100 : 0}%`,
+          height: "100%",
+          background: "#4f46e5",
+          transition: "width .3s",
+        }}
+      />
+    </div>
+
+    {linkedinJob.error && <div className="dgp-alert">{linkedinJob.error}</div>}
+
+    <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
+      <thead>
+        <tr style={{ textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>
+          <th style={{ padding: 6 }}>#</th>
+          <th style={{ padding: 6 }}>Prospect</th>
+          <th style={{ padding: 6 }}>Result</th>
+          <th style={{ padding: 6 }}>Details</th>
+        </tr>
+      </thead>
+      <tbody>
+        {linkedinJob.results.map((r, i) => (
+          <tr key={r.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+            <td style={{ padding: 6 }}>{i + 1}</td>
+            <td style={{ padding: 6 }}>{r.name}</td>
+            <td style={{ padding: 6 }}>
+              <span
+                className={`dgp-pill dgp-pill-${
+                  r.status === "failed" ? "danger"
+                  : r.status === "skipped" ? "warning"
+                  : r.status === "disqualified" ? "danger"
+                  : "success"
+                }`}
+              >
+                {r.status}
+              </span>
+            </td>
+            <td style={{ padding: 6 }}>
+              {r.summary || (typeof r.detail === "string" ? r.detail : "")}
+            </td>
+          </tr>
+        ))}
+        {linkedinJob.state === "running" && linkedinJob.current && (
+          <tr>
+            <td style={{ padding: 6 }}>{linkedinJob.results.length + 1}</td>
+            <td style={{ padding: 6 }}>{linkedinJob.current}</td>
+            <td style={{ padding: 6 }} colSpan={2}>Updating...</td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+    {linkedinJob.state === "running" &&
+      linkedinJob.total - linkedinJob.results.length - (linkedinJob.current ? 1 : 0) > 0 && (
+        <div className="dgp-muted" style={{ marginTop: 8 }}>
+          {linkedinJob.total - linkedinJob.results.length - (linkedinJob.current ? 1 : 0)} waiting
+        </div>
+      )}
+  </div>
+)}
       <CompanyImportModal
         open={importOpen}
         onClose={() => setImportOpen(false)}
@@ -1038,6 +1392,79 @@ export default function DataGridPage({
               aria-label={`Search ${title}`}
             />
           </div>
+         <div className="dgp-colfind" ref={colFindRef}>
+  <input
+    type="text"
+    className="dgp-input"
+    value={colQuery}
+    placeholder="Find column..."
+    aria-label="Find column"
+    autoComplete="off"
+    onChange={(e) => {
+      setColQuery(e.target.value);
+      setColActive(0);
+      setColMenuOpen(true);
+      if (!e.target.value) setHighlightKey(null);
+    }}
+    onFocus={() => setColMenuOpen(true)}
+    onKeyDown={(e) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setColMenuOpen(true);
+        setColActive((i) => Math.min(i + 1, colMatches.length - 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setColActive((i) => Math.max(i - 1, 0));
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const m = colMatches[colActive];
+        if (m) goToColumn(m.key);
+      } else if (e.key === "Escape") {
+        setColMenuOpen(false);
+        setColQuery("");
+        setHighlightKey(null);
+      }
+    }}
+  />
+
+  {highlightKey && (
+    <button
+      type="button"
+      className="dgp-link"
+      onClick={() => {
+        setHighlightKey(null);
+        setColQuery("");
+      }}
+    >
+      Clear
+    </button>
+  )}
+
+  {colMenuOpen && colMatches.length > 0 && (
+    <div className="dgp-colfind-list" role="listbox">
+      {colMatches.map((f, i) => (
+        <button
+          key={f.key}
+          type="button"
+          role="option"
+          aria-selected={i === colActive}
+          className={`dgp-colfind-item ${i === colActive ? "active" : ""}`}
+          ref={(el) => {
+            if (el && i === colActive) el.scrollIntoView({ block: "nearest" });
+          }}
+          onMouseEnter={() => setColActive(i)}
+          onMouseDown={(e) => {
+            e.preventDefault(); // keep the input focused, select on press
+            goToColumn(f.key);
+          }}
+        >
+          {f.name}
+          {!visibleKeys.includes(f.key) && <em> (hidden)</em>}
+        </button>
+      ))}
+    </div>
+  )}
+</div>
 
           <div className="dgp-tools">
             {activeCount > 0 && (
@@ -1160,7 +1587,7 @@ export default function DataGridPage({
 
         {error && <div className="dgp-alert">{String(error)}</div>}
 
-        <div className={`dgp-grid ${loading ? "is-loading" : ""}`}>
+       <div ref={gridWrapRef} className={`dgp-grid ${loading ? "is-loading" : ""}`}>
           <HeaderCtx.Provider value={headerCtx}>
             {listError && <div className="dgp-alert">{listError}</div>}
             {companyList && (

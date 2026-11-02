@@ -5,8 +5,9 @@ import { randomUUID } from "crypto";
 import User from '../models/User.js';
 import mongoose from 'mongoose';
 import { logUserActivity } from "../services/userActivity.service.js";
-
 import { emitImportCompleted } from '../utils/importNotifications.js';
+const PY_URL = process.env.PY_SCRAPER_URL || "http://192.168.1.142:8000";
+
 /* ====================================================================
    Excel header -> Prospect schema field
    ==================================================================== */
@@ -1014,3 +1015,33 @@ export async function companyListSample(req, res, next) {
     next(e);
   }
 }
+
+export const updateLinkedinProfiles = async (req, res, next) => {
+  try {
+    if (req.params.resource !== "prospect") {
+      return res.status(400).json({ message: "Only prospects are supported." });
+    }
+    const ids = (req.body.records || []).map((r) => r._id).filter(Boolean);
+    if (!ids.length) return res.status(400).json({ message: "No records selected." });
+
+    const r = await fetch(`${PY_URL}/api/prospects/update-linkedin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    const data = await r.json();
+    if (!r.ok) return res.status(r.status).json({ message: data.detail || "Scraper error" });
+    res.status(202).json(data);
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const linkedinUpdateStatus = async (req, res, next) => {
+  try {
+    const r = await fetch(`${PY_URL}/api/prospects/update-linkedin/${req.params.jobId}`);
+    res.status(r.status).json(await r.json());
+  } catch (e) {
+    next(e);
+  }
+};

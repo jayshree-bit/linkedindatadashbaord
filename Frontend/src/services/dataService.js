@@ -164,5 +164,18 @@ export const downloadCompanyListSampleApi = async () => {
   return data;
 };
 
-export const updateLinkedinProfilesApi = (resource, ids) =>
-  api.post('/private/linkedin-update', { resource, ids }).then((r) => r.data);
+// Start the LinkedIn update job for the selected prospect records.
+export const updateLinkedinProfilesApi = (resource, records) =>
+  api
+    .post(`/private/${resource}/update-linkedin`, { records })
+    .then((r) => r.data); // 202 -> { jobId, ... } from the Python service
+
+// Poll the job status.
+export const getLinkedinUpdateStatusApi = (jobId) =>
+  api
+    .get(`/private/update-linkedin/${encodeURIComponent(jobId)}`)
+    .then((r) => r.data);
+
+
+    // r.post("/:resource/update-linkedin",authorize("prospect", "view"), data.updateLinkedinProfiles);
+    // r.get("/update-linkedin/:jobId", authorize("prospect", "view"),data.linkedinUpdateStatus);
