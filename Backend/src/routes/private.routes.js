@@ -99,4 +99,6 @@ r.get(
   getCompanyImportStatus
 );
 
+r.get('/prospect/linkedin-logs', data.getLinkedinLogs);
+r.get('/prospect/linkedin-logs/export', data.exportLinkedinLogs);
 export default r;

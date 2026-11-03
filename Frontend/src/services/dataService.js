@@ -177,5 +177,11 @@ export const getLinkedinUpdateStatusApi = (jobId) =>
     .then((r) => r.data);
 
 
-    // r.post("/:resource/update-linkedin",authorize("prospect", "view"), data.updateLinkedinProfiles);
-    // r.get("/update-linkedin/:jobId", authorize("prospect", "view"),data.linkedinUpdateStatus);
+export const getLinkedinLogsApi = (params) =>
+  api.get("/private/prospect/linkedin-logs", { params }).then((r) => r.data);
+
+
+export const exportLinkedinLogsApi = (params) =>
+  api
+    .get("/private/prospect/linkedin-logs/export", { params, responseType: "blob" })
+    .then((r) => r.data);

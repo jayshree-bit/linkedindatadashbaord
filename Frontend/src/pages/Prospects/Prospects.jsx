@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import DataGridPage from '../../components/DataGridPage';
 import DateRangeFilter from '../../components/DateRangeFilter';
+import LinkedinLogPanel from '../../components/LinkedinLogPanel';
 const fields = [
   { key: 'employeeCode', name: 'Employee Code' },
   { key: 'employeeName', name: 'Employee Name' },
@@ -87,7 +88,7 @@ export default function Prospects() {
   const setTab = (next) => setParam('tab', next === 'all' ? '' : next);
 
   // The date range only makes sense on All and Updated.
-  const dateEnabled = tab !== 'pending';
+  const dateEnabled = tab !== 'pending' && tab !== 'log';
   const rangeInvalid = Boolean(fromDate && toDate && fromDate > toDate);
 
   const fixedFilters = useMemo(() => {
@@ -129,7 +130,8 @@ const DEFAULT_SORT = [{ columnKey: 'updatedAt', direction: 'DESC' }];
         {[
           ['all', 'All'],
           ['updated', 'Updated'],
-          ['pending', 'Not updated'],
+          ['pending', 'Not updated'], 
+           ['log', 'Download log'],
         ].map(([id, label]) => (
           <button
             key={id}
@@ -144,18 +146,22 @@ const DEFAULT_SORT = [{ columnKey: 'updatedAt', direction: 'DESC' }];
         ))}
       </div>
 
-      {dateEnabled && (
+           {dateEnabled && (
         <DateRangeFilter from={fromDate} to={toDate} onChange={setRange} />
       )}
 
-      <DataGridPage
-        resource="prospect"
-        title={`${employee ? `${baseTitle} – ${employee}` : baseTitle}${tabLabel}`}
-        fields={fields}
-        fixedFilters={fixedFilters}
-        cardConfig={cardConfig}
-         defaultSort={DEFAULT_SORT}
-      />
+      {tab === 'log' ? (
+        <LinkedinLogPanel />
+      ) : (
+        <DataGridPage
+          resource="prospect"
+          title={`${employee ? `${baseTitle} – ${employee}` : baseTitle}${tabLabel}`}
+          fields={fields}
+          fixedFilters={fixedFilters}
+          cardConfig={cardConfig}
+          defaultSort={DEFAULT_SORT}
+        />
+      )}
     </>
   );
 }

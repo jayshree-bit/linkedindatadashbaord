@@ -7,7 +7,9 @@ import mongoose from 'mongoose';
 import { logUserActivity } from "../services/userActivity.service.js";
 import { emitImportCompleted } from '../utils/importNotifications.js';
 const PY_URL = process.env.PY_SCRAPER_URL || "http://192.168.1.142:8000";
+import LinkedinUpdateLog from '../models/LinkedinUpdateLog.js';
 
+const IST = '+05:30';
 /* ====================================================================
    Excel header -> Prospect schema field
    ==================================================================== */
@@ -1094,6 +1096,67 @@ export const linkedinUpdateStatus = async (req, res, next) => {
     }
 
     res.status(r.status).json(data);
+  } catch (e) {
+    next(e);
+  }
+};
+
+
+
+const buildLogQuery = ({ from, to, jobId }) => {
+  const q = {};
+  if (jobId) q.jobId = jobId;
+  if (from || to) {
+    q.createdAt = {};
+    if (from) q.createdAt.$gte = new Date(`${from}T00:00:00.000${IST}`);
+    if (to) q.createdAt.$lte = new Date(`${to}T23:59:59.999${IST}`);
+  }
+  return q;
+};
+
+export const getLinkedinLogs = async (req, res, next) => {
+  try {
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Number(req.query.limit) || 20);
+    const q = buildLogQuery(req.query);
+    const [rows, total] = await Promise.all([
+      LinkedinUpdateLog.find(q).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      LinkedinUpdateLog.countDocuments(q),
+    ]);
+    res.json({ rows, page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const exportLinkedinLogs = async (req, res, next) => {
+  try {
+    const q = buildLogQuery(req.query);
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('LinkedIn Update Log');
+    ws.columns = [
+      { header: 'Date & Time', key: 'createdAt', width: 22 },
+      { header: 'Prospect', key: 'name', width: 28 },
+      { header: 'LinkedIn URL', key: 'linkedinUrl', width: 55 },
+      { header: 'Result', key: 'status', width: 16 },
+      { header: 'Details', key: 'details', width: 70 },
+      { header: 'Job ID', key: 'jobId', width: 38 },
+    ];
+    ws.getRow(1).font = { bold: true };
+
+    for await (const d of LinkedinUpdateLog.find(q).sort({ createdAt: -1 }).lean().cursor()) {
+      ws.addRow({
+        ...d,
+        createdAt: d.createdAt
+          ? new Date(d.createdAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+          : '',
+      });
+    }
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="linkedin-update-log.xlsx"');
+    await wb.xlsx.write(res);
+    res.end();
   } catch (e) {
     next(e);
   }

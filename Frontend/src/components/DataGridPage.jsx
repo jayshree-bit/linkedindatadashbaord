@@ -28,12 +28,13 @@ import {
   uploadCompanyListApi,
   updateLinkedinProfilesApi,
   getLinkedinUpdateStatusApi,
+  exportLinkedinLogsApi,
 } from "../services/dataService";
 import "./DataGridPage.css";
 import ImportExcelModal from "./ImportExcelModal";
 import CompanyImportModal from "./CompanyImportModal";
 import CompanyListModal from "./CompanyListModal";
-
+import { saveBlob } from "./LinkedinLogPanel";
 /* ---------- Filter model helpers ---------- */
 
 const OPERATORS = [
@@ -168,7 +169,27 @@ function Toaster({ toasts, onClose }) {
     document.body,
   );
 }
+const LINKEDIN_JOB_KEY = "linkedinUpdateJob";
 
+const saveJobMeta = (meta) => {
+  try {
+    localStorage.setItem(LINKEDIN_JOB_KEY, JSON.stringify(meta));
+  } catch {}
+};
+const loadJobMeta = () => {
+  try {
+    return JSON.parse(localStorage.getItem(LINKEDIN_JOB_KEY) || "null");
+  } catch {
+    return null;
+  }
+};
+const clearJobMeta = () => {
+  try {
+    localStorage.removeItem(LINKEDIN_JOB_KEY);
+  } catch {}
+};
+const nameOfRecord = (r) =>
+  [r.firstName, r.lastName].filter(Boolean).join(" ") || r.employeeName || "—";
 /* ---------- Header (AG Grid style: title + sort icon + menu, then filter box) ---------- */
 
 const HeaderCtx = createContext(null);
@@ -670,23 +691,28 @@ function RecordCard({
   const title = cfg.title(row);
   const subtitle = cfg.subtitle?.(row);
   const badge = cfg.badgeKey ? row[cfg.badgeKey] : null;
-function Avatar({ url, text }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [url]);
+  function Avatar({ url, text }) {
+    const [failed, setFailed] = useState(false);
+    useEffect(() => setFailed(false), [url]);
 
-  if (url && !failed) {
-    return (
-      <img
-        src={url}
-        alt=""
-        referrerPolicy="no-referrer"
-        onError={() => setFailed(true)}
-        style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }}
-      />
-    );
+    if (url && !failed) {
+      return (
+        <img
+          src={url}
+          alt=""
+          referrerPolicy="no-referrer"
+          onError={() => setFailed(true)}
+          style={{
+            width: "100%",
+            height: "100%",
+            borderRadius: "50%",
+            objectFit: "cover",
+          }}
+        />
+      );
+    }
+    return initialsOf(text);
   }
-  return initialsOf(text);
-}
   return (
     <article className={`dgp-card-item ${selected ? "is-selected" : ""}`}>
       <header className="dgp-ci-head">
@@ -699,9 +725,9 @@ function Avatar({ url, text }) {
             aria-label={`Select ${title}`}
           />
         )}
-    <div className="dgp-ci-avatar" aria-hidden="true">
-  <Avatar url={row.profilePhotoUrl} text={title} />
-</div>
+        <div className="dgp-ci-avatar" aria-hidden="true">
+          <Avatar url={row.profilePhotoUrl} text={title} />
+        </div>
         <div className="dgp-ci-id">
           <h3 title={title}>{title}</h3>
           {subtitle && <p title={subtitle}>{subtitle}</p>}
@@ -886,7 +912,12 @@ export default function DataGridPage({
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
-  const [sortColumns, setSortColumns] = useState([]);
+  const [sortColumns, setSortColumns] = useState([
+  {
+    columnKey: "updatedAt", // Use the exact Updated At field key
+    direction: "DESC",
+  },
+]);
   const [filterModels, setFilterModels] = useState({});
   const [filters, setFilters] = useState({});
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
@@ -901,7 +932,9 @@ export default function DataGridPage({
   const [importOpen, setImportOpen] = useState(false);
   const [exportBytes, setExportBytes] = useState(0);
   const sortBy = sortColumns[0]?.columnKey ?? "";
+
   const sortOrder = sortColumns[0]?.direction === "DESC" ? "desc" : "asc";
+  
   const [exportStatus, setExportStatus] = useState("");
   const [companyList, setCompanyList] = useState(null); // { listId, domainCount, nameCount, fileName }
   const [listError, setListError] = useState("");
@@ -933,6 +966,7 @@ export default function DataGridPage({
   const [linkedinStatus, setLinkedinStatus] = useState("");
   const [linkedinJob, setLinkedinJob] = useState(null);
   const [linkedinQueue, setLinkedinQueue] = useState([]);
+
   /* ---- Toasts ---- */
   const [toasts, setToasts] = useState([]);
   const toastId = useRef(0);
@@ -944,6 +978,8 @@ export default function DataGridPage({
   const gridWrapRef = useRef(null);
   const [colActive, setColActive] = useState(0);
   const colFindRef = useRef(null);
+  const [logOpen, setLogOpen] = useState(false);
+  
   const dismissToast = useCallback(
     (id) => setToasts((current) => current.filter((t) => t.id !== id)),
     [],
@@ -1048,35 +1084,35 @@ export default function DataGridPage({
     },
     [resource],
   );
-const STATUS_KEY = "status";
-const hasStatusField = fieldMap.has(STATUS_KEY);
-const statusLocked = Boolean(fixedFilters[STATUS_KEY]); // e.g. ?status=Qualified in the URL
-const [statusOptions, setStatusOptions] = useState([]);
+  const STATUS_KEY = "status";
+  const hasStatusField = fieldMap.has(STATUS_KEY);
+  const statusLocked = Boolean(fixedFilters[STATUS_KEY]); // e.g. ?status=Qualified in the URL
+  const [statusOptions, setStatusOptions] = useState([]);
 
-useEffect(() => {
-  if (view !== "card" || !hasStatusField || statusLocked) return;
-  let cancelled = false;
-  fetchDistinct(STATUS_KEY, "")
-    .then((res) => {
-      if (!cancelled)
-        setStatusOptions((res?.values ?? []).filter((v) => !isBlankValue(v)));
-    })
-    .catch(() => {});
-  return () => {
-    cancelled = true;
-  };
-}, [view, hasStatusField, statusLocked, fetchDistinct]);
+  useEffect(() => {
+    if (view !== "card" || !hasStatusField || statusLocked) return;
+    let cancelled = false;
+    fetchDistinct(STATUS_KEY, "")
+      .then((res) => {
+        if (!cancelled)
+          setStatusOptions((res?.values ?? []).filter((v) => !isBlankValue(v)));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [view, hasStatusField, statusLocked, fetchDistinct]);
 
-const activeStatus =
-  filterModels[STATUS_KEY]?.op === "equals"
-    ? (filterModels[STATUS_KEY].text ?? "")
-    : "";
+  const activeStatus =
+    filterModels[STATUS_KEY]?.op === "equals"
+      ? (filterModels[STATUS_KEY].text ?? "")
+      : "";
 
-const pickStatus = (value) =>
-  headerCtx.setFilterModel(
-    STATUS_KEY,
-    value ? { op: "equals", text: value, values: null } : null,
-  );
+  const pickStatus = (value) =>
+    headerCtx.setFilterModel(
+      STATUS_KEY,
+      value ? { op: "equals", text: value, values: null } : null,
+    );
   // Fields in the user's chosen order (new fields that appear later are appended).
   const orderedFields = useMemo(() => {
     const byKey = new Map(fields.map((f) => [f.key, f]));
@@ -1336,116 +1372,186 @@ const pickStatus = (value) =>
       }),
     );
 
-  const updateLinkedinProfiles = async () => {
-    const records = getSelectedRecords();
-    if (!records.length) return;
-setLinkedinQueue(
-  records.map((r) => ({
-    id: String(r._id),
-    name:
-      [r.firstName, r.lastName].filter(Boolean).join(" ") ||
-      r.employeeName ||
-      "—",
-  })),
-);
-    setLinkedinBusy(true);
-    setLinkedinStatus("Starting...");
-  setLinkedinJob({
-  state: "running",
-  total: records.length,
-  processed: 0,
-  current: "",
-  results: [],
-  error: null,
-  queue: records.map((r) => ({
-    id: String(r._id),
-    name:
-      [r.firstName, r.lastName].filter(Boolean).join(" ") ||
-      r.employeeName ||
-      "—",
-  })),
-});
-
+  // always points to the newest reload function
+  const reloadRef = useRef(reloadCurrentPage);
+  reloadRef.current = reloadCurrentPage;
+  const pollRunRef = useRef(0);
+  const downloadJobLog = async () => {
     try {
-      const started = await updateLinkedinProfilesApi(resource, records);
-      const jobId = started.jobId ?? started.job_id;
-      if (!jobId) throw new Error("No job id returned.");
-
-      clearSelection();
-
-      let last = null;
-      let seen = 0;
-      for (;;) {
-        await new Promise((r) => setTimeout(r, 1500));
-        const s = await getLinkedinUpdateStatusApi(jobId);
-        const results = Array.isArray(s.results) ? s.results : [];
-
-      setLinkedinJob((j) => ({ ...s, results, queue: j?.queue ?? [] }));
-        setLinkedinStatus(
-          `Updating... ${s.processed ?? 0}/${s.total ?? records.length}`,
-        );
-
-        // A new profile finished: reload the grid now, don't wait for the rest.
-        if (results.length > seen) {
-          seen = results.length;
-          reloadCurrentPage();
-        }
-
-        if (s.state === "failed")
-          throw new Error(s.error || "LinkedIn update failed");
-        if (s.state === "done" || s.state === "stopped") {
-          last = s;
-          break;
-        }
-      }
-
-      const results = Array.isArray(last?.results) ? last.results : [];
-      const notUpdated = results.filter(
-        (r) => r.status === "skipped" || r.status === "failed",
-      ).length;
-      const updated = results.length - notUpdated;
-
-      if (last?.state === "stopped") {
-        showToast(
-          `${last.error || "LinkedIn update stopped early."} (${updated} updated, ${notUpdated} skipped or failed)`,
-          "warning",
-          9000,
-        );
-      } else if (results.length && notUpdated === results.length) {
-        showToast(
-          `No profiles were updated. ${notUpdated} record(s) were skipped or failed.`,
-          "warning",
-          7000,
-        );
-      } else if (results.length && notUpdated > 0) {
-        showToast(
-          `LinkedIn update finished: ${updated} updated, ${notUpdated} skipped or failed.`,
-          "info",
-          7000,
-        );
-      } else {
-        showToast(
-          `LinkedIn profiles updated for ${records.length} record(s).`,
-          "success",
-        );
-      }
-    } catch (err) {
-      setLinkedinJob((j) =>
-        j ? { ...j, state: "failed", error: err.message } : j,
+      const blob = await exportLinkedinLogsApi({ jobId: linkedinJob.jobId });
+      saveBlob(
+        blob,
+        `linkedin-update-log-${new Date().toISOString().slice(0, 10)}.xlsx`,
       );
-      reloadCurrentPage();
+    } catch (err) {
+      console.error("Log download failed:", err);
       showToast(
-        err?.response?.data?.message ||
-          err.message ||
-          "Could not update LinkedIn profiles.",
+        err?.response?.data?.message || err.message || "Log download failed.",
         "error",
+        6000,
+      );
+    }
+  };
+
+// One polling loop, used for both a fresh start and a resume after refresh.
+const runLinkedinJob = async (jobId, total) => {
+  const runId = ++pollRunRef.current;
+  const isCurrent = () => pollRunRef.current === runId;
+
+  setLinkedinBusy(true);
+  try {
+    let last = null;
+    let seen = 0;
+
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 1500));
+      if (!isCurrent()) return;
+
+      const s = await getLinkedinUpdateStatusApi(jobId);
+      if (!isCurrent()) return;
+
+      const results = Array.isArray(s.results) ? s.results : [];
+      setLinkedinJob((j) => ({
+        ...s,
+        results,
+        queue: j?.queue ?? [],
+        jobId: j?.jobId ?? jobId,
+      }));
+      setLinkedinStatus(`Updating... ${s.processed ?? 0}/${s.total ?? total}`);
+
+      if (results.length > seen) {
+        seen = results.length;
+        reloadRef.current();
+      }
+
+      if (s.state === "failed") {
+        clearJobMeta();
+        throw new Error(s.error || "LinkedIn update failed");
+      }
+      if (s.state === "done" || s.state === "stopped") {
+        clearJobMeta(); // finished: a refresh will now hide the table
+        last = s;
+        break;
+      }
+    }
+
+    const results = Array.isArray(last?.results) ? last.results : [];
+    const notUpdated = results.filter(
+      (r) => r.status === "skipped" || r.status === "failed",
+    ).length;
+    const updated = results.length - notUpdated;
+
+    if (last?.state === "stopped") {
+      showToast(
+        `${last.error || "LinkedIn update stopped early."} (${updated} updated, ${notUpdated} skipped or failed)`,
+        "warning",
+        9000,
+      );
+    } else if (results.length && notUpdated === results.length) {
+      showToast(
+        `No profiles were updated. ${notUpdated} record(s) were skipped or failed.`,
+        "warning",
         7000,
       );
-    } finally {
+    } else if (results.length && notUpdated > 0) {
+      showToast(
+        `LinkedIn update finished: ${updated} updated, ${notUpdated} skipped or failed.`,
+        "info",
+        7000,
+      );
+    } else {
+      showToast(`LinkedIn profiles updated for ${total} record(s).`, "success");
+    }
+  } catch (err) {
+    if (!isCurrent()) return;
+    if (err?.response?.status === 404) clearJobMeta(); // server no longer knows this job
+    setLinkedinJob((j) =>
+      j ? { ...j, state: "failed", error: err.message } : j,
+    );
+    reloadRef.current();
+    showToast(
+      err?.response?.data?.message ||
+        err.message ||
+        "Could not update LinkedIn profiles.",
+      "error",
+      7000,
+    );
+  } finally {
+    if (isCurrent()) {
       setLinkedinBusy(false);
       setLinkedinStatus("");
     }
+  }
+};
+
+const updateLinkedinProfiles = async () => {
+  const records = getSelectedRecords();
+  if (!records.length) return;
+
+  const queue = records.map((r) => ({ id: String(r._id), name: nameOfRecord(r) }));
+
+  setLinkedinQueue(queue);
+  setLinkedinBusy(true);
+  setLinkedinStatus("Starting...");
+  setLinkedinJob({
+    state: "running",
+    total: records.length,
+    processed: 0,
+    current: "",
+    results: [],
+    error: null,
+    queue,
+  });
+
+  try {
+    const started = await updateLinkedinProfilesApi(resource, records);
+    const jobId = started.jobId ?? started.job_id;
+    if (!jobId) throw new Error("No job id returned.");
+
+    saveJobMeta({ jobId, total: records.length, queue }); // survives refresh
+    setLinkedinJob((j) => (j ? { ...j, jobId } : j));
+    clearSelection();
+
+    await runLinkedinJob(jobId, records.length);
+  } catch (err) {
+    setLinkedinBusy(false);
+    setLinkedinStatus("");
+    setLinkedinJob((j) =>
+      j ? { ...j, state: "failed", error: err.message } : j,
+    );
+    showToast(
+      err?.response?.data?.message || err.message || "Could not start the LinkedIn update.",
+      "error",
+      7000,
+    );
+  }
+};
+
+// After a page refresh, pick the running job back up.
+useEffect(() => {
+  if (resource !== "prospect") return;
+  const meta = loadJobMeta();
+  if (!meta?.jobId) return;
+
+  const queue = Array.isArray(meta.queue) ? meta.queue : [];
+  setLinkedinQueue(queue);
+  setLinkedinJob({
+    state: "running",
+    total: meta.total ?? queue.length,
+    processed: 0,
+    current: "",
+    results: [],
+    error: null,
+    queue,
+    jobId: meta.jobId,
+  });
+  runLinkedinJob(meta.jobId, meta.total ?? queue.length);
+
+  return () => {
+    pollRunRef.current++; // stop the loop when leaving the page
   };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [resource]);
 
   const onRowsChange = (newRows, { indexes }) => {
     indexes.forEach((index) => {
@@ -1564,9 +1670,8 @@ setLinkedinQueue(
     setSearchInput("");
     setSortColumns([]);
   };
-const sortChanged =
-  JSON.stringify(sortColumns) !== JSON.stringify(defaultSort);
-
+  const sortChanged =
+    JSON.stringify(sortColumns) !== JSON.stringify(defaultSort);
 
   const activeCount =
     Object.keys(filters).length +
@@ -1623,6 +1728,7 @@ const sortChanged =
               Filter by company list
             </button>
           )}
+
           {resource === "prospect" && canEdit && selectedRows.size > 0 && (
             <button
               type="button"
@@ -1676,13 +1782,24 @@ const sortChanged =
               {linkedinJob.state === "failed" && " (failed)"}
             </strong>
             {!linkedinBusy && (
-              <button
-                type="button"
-                className="dgp-btn dgp-btn-sm"
-                onClick={() => setLinkedinJob(null)}
-              >
-                Close
-              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                {linkedinJob.jobId && (
+                  <button
+                    type="button"
+                    className="dgp-btn dgp-btn-sm dgp-btn-success"
+                    onClick={downloadJobLog}
+                  >
+                    Download log
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="dgp-btn dgp-btn-sm"
+                  onClick={() => setLinkedinJob(null)}
+                >
+                  Close
+                </button>
+              </div>
             )}
           </div>
 
@@ -1709,64 +1826,82 @@ const sortChanged =
             <div className="dgp-alert">{linkedinJob.error}</div>
           )}
 
-          <table
-            style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}
-          >
-            <thead>
-              <tr
-                style={{ textAlign: "left", borderBottom: "1px solid #e5e7eb" }}
-              >
-                <th style={{ padding: 6 }}>#</th>
-                <th style={{ padding: 6 }}>Prospect</th>
-                <th style={{ padding: 6 }}>Result</th>
-                <th style={{ padding: 6 }}>Details</th>
-              </tr>
-            </thead>
-      <tbody>
-  {linkedinQueue.map((q, i) => {
-    const matchFor = (item, idx) =>
-      linkedinJob.results.find((r) => String(r.id) === item.id) ??
-      linkedinJob.results[idx];
+          <div className="w-full max-h-[420px] overflow-y-auto overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+            <table className="w-full text-[13px] border-collapse">
+              <thead className="sticky top-0 z-10 bg-gray-100 dark:bg-gray-800">
+                <tr className="text-left border-b border-gray-200 dark:border-gray-700">
+                  <th className="p-2">#</th>
+                  <th className="p-2">Prospect</th>
+                  <th className="p-2">Result</th>
+                  <th className="p-2">Details</th>
+                </tr>
+              </thead>
 
-    const res = matchFor(q, i);
-    const finished = ["done", "stopped", "failed"].includes(linkedinJob.state);
-    const firstOpen = linkedinQueue.findIndex((x, idx) => !matchFor(x, idx));
-    const isCurrent = !res && !finished && i === firstOpen;
+              <tbody>
+                {linkedinQueue.map((q, i) => {
+                  const matchFor = (item, idx) =>
+                    linkedinJob.results.find(
+                      (r) => String(r.id) === String(item.id),
+                    ) ?? linkedinJob.results[idx];
 
-    let label = "Pending";
-    let color = "secondary";
-    if (res) {
-      label = res.status;
-      color =
-        res.status === "failed" || res.status === "disqualified"
-          ? "danger"
-          : res.status === "skipped"
-            ? "warning"
-            : "success";
-    } else if (isCurrent) {
-      label = "Updating...";
-      color = "warning";
-    } else if (finished) {
-      label = "Not processed";
-    }
+                  const res = matchFor(q, i);
+                  const finished = ["done", "stopped", "failed"].includes(
+                    linkedinJob.state,
+                  );
 
-    return (
-      <tr key={q.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
-        <td style={{ padding: 6 }}>{i + 1}</td>
-        <td style={{ padding: 6 }}>{res?.name || q.name}</td>
-        <td style={{ padding: 6 }}>
-          <span className={`dgp-pill dgp-pill-${color}`}>{label}</span>
-        </td>
-        <td style={{ padding: 6 }}>
-          {res
-            ? res.summary || (typeof res.detail === "string" ? res.detail : "")
-            : ""}
-        </td>
-      </tr>
-    );
-  })}
-</tbody>
-          </table>
+                  const firstOpen = linkedinQueue.findIndex(
+                    (x, idx) => !matchFor(x, idx),
+                  );
+
+                  const isCurrent = !res && !finished && i === firstOpen;
+
+                  let label = "Pending";
+                  let color = "secondary";
+
+                  if (res) {
+                    label = res.status;
+                    color =
+                      res.status === "failed" || res.status === "disqualified"
+                        ? "danger"
+                        : res.status === "skipped"
+                          ? "warning"
+                          : "success";
+                  } else if (isCurrent) {
+                    label = "Updating...";
+                    color = "warning";
+                  } else if (finished) {
+                    label = "Not processed";
+                  }
+
+                  return (
+                    <tr
+                      key={q.id}
+                      className="border-b border-gray-100 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800/70"
+                    >
+                      <td className="p-2">{i + 1}</td>
+
+                      <td className="p-2 whitespace-nowrap text-gray-900 dark:text-gray-100">
+                        {res?.name || q.name}
+                      </td>
+
+                      <td className="p-2 whitespace-nowrap">
+                        <span className={`dgp-pill dgp-pill-${color}`}>
+                          {label}
+                        </span>
+                      </td>
+
+                      <td className="p-2 min-w-[200px] text-gray-600 dark:text-gray-300">
+                        {res
+                          ? res.summary ||
+                            (typeof res.detail === "string" ? res.detail : "")
+                          : ""}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
           {linkedinJob.state === "running" &&
             linkedinJob.total -
               linkedinJob.results.length -
@@ -1781,6 +1916,7 @@ const sortChanged =
             )}
         </div>
       )}
+
       <CompanyImportModal
         open={importOpen}
         onClose={() => setImportOpen(false)}
@@ -1993,36 +2129,43 @@ const sortChanged =
               )}
             </div>
 
-           {view === "card" && (
-  <label className="dgp-rows">
-    Sort
-    <select
-      className="dgp-select"
-      value={sortBy}
-      onChange={(e) =>
-        headerCtx.setSort(
-          e.target.value,
-          e.target.value ? (sortColumns[0]?.direction ?? "DESC") : null,
-        )
-      }
-    >
-      <option value="">Default</option>
-      {orderedFields.map((f) => (
-        <option key={f.key} value={f.key}>{f.name}</option>
-      ))}
-    </select>
-    <button
-      type="button"
-      className="dgp-btn dgp-btn-sm"
-      disabled={!sortBy}
-      onClick={() =>
-        headerCtx.setSort(sortBy, sortOrder === "desc" ? "ASC" : "DESC")
-      }
-    >
-      {sortOrder === "desc" ? "↓ Desc" : "↑ Asc"}
-    </button>
-  </label>
-)}
+            {view === "card" && (
+              <label className="dgp-rows">
+                Sort
+                <select
+                  className="dgp-select"
+                  value={sortBy}
+                  onChange={(e) =>
+                    headerCtx.setSort(
+                      e.target.value,
+                      e.target.value
+                        ? (sortColumns[0]?.direction ?? "DESC")
+                        : null,
+                    )
+                  }
+                >
+                  <option value="">Default</option>
+                  {orderedFields.map((f) => (
+                    <option key={f.key} value={f.key}>
+                      {f.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="dgp-btn dgp-btn-sm"
+                  disabled={!sortBy}
+                  onClick={() =>
+                    headerCtx.setSort(
+                      sortBy,
+                      sortOrder === "desc" ? "ASC" : "DESC",
+                    )
+                  }
+                >
+                  {sortOrder === "desc" ? "↓ Desc" : "↑ Asc"}
+                </button>
+              </label>
+            )}
           </div>
         </div>
 
@@ -2063,63 +2206,71 @@ const sortChanged =
                 defaultColumnOptions={{ resizable: true }}
               />
             ) : (
-             <>
-  {hasStatusField && !statusLocked && statusOptions.length > 0 && (
-    <div className="dgp-statusbar" role="group" aria-label="Filter by status">
-      <button
-        type="button"
-        className={`dgp-chipbtn ${activeStatus === "" ? "on" : ""}`}
-        onClick={() => pickStatus("")}
-      >
-        All
-      </button>
-      {statusOptions.map((s) => (
-        <button
-          key={s}
-          type="button"
-          className={`dgp-chipbtn ${activeStatus === String(s) ? "on" : ""}`}
-          onClick={() => pickStatus(String(s))}
-        >
-          {s}
-        </button>
-      ))}
-    </div>
-  )}
+              <>
+                {hasStatusField &&
+                  !statusLocked &&
+                  statusOptions.length > 0 && (
+                    <div
+                      className="dgp-statusbar"
+                      role="group"
+                      aria-label="Filter by status"
+                    >
+                      <button
+                        type="button"
+                        className={`dgp-chipbtn ${activeStatus === "" ? "on" : ""}`}
+                        onClick={() => pickStatus("")}
+                      >
+                        All
+                      </button>
+                      {statusOptions.map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          className={`dgp-chipbtn ${activeStatus === String(s) ? "on" : ""}`}
+                          onClick={() => pickStatus(String(s))}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
-  {selectableCards && rows.length > 0 && (
-    <div className="dgp-cards-bar">
-      <label className="dgp-cards-selectall">
-        <input
-          type="checkbox"
-          checked={allOnPage}
-          ref={(el) => {
-            if (el) el.indeterminate = someOnPage && !allOnPage;
-          }}
-          onChange={toggleSelectAllCards}
-        />
-        <span>Select all on this page ({rows.length})</span>
-      </label>
-      {selectedRows.size > 0 && (
-        <span className="dgp-muted">{selectedRows.size} selected</span>
-      )}
-    </div>
-  )}
+                {selectableCards && rows.length > 0 && (
+                  <div className="dgp-cards-bar">
+                    <label className="dgp-cards-selectall">
+                      <input
+                        type="checkbox"
+                        checked={allOnPage}
+                        ref={(el) => {
+                          if (el) el.indeterminate = someOnPage && !allOnPage;
+                        }}
+                        onChange={toggleSelectAllCards}
+                      />
+                      <span>Select all on this page ({rows.length})</span>
+                    </label>
+                    {selectedRows.size > 0 && (
+                      <span className="dgp-muted">
+                        {selectedRows.size} selected
+                      </span>
+                    )}
+                  </div>
+                )}
 
-  <div className="dgp-cards">
-    {rows.map((row) => (
-      <RecordCard
-        key={row._id}
-        row={row}
-        cfg={cardCfg}
-        fieldMap={fieldMap}
-        selectable={selectableCards}
-        selected={selectedRows.has(row._id)}
-        onToggle={() => toggleCardSelect(row)}
-        onMore={() => setDetailRow(row)}
-      />
-    ))}
-  </div>
-</>
+                <div className="dgp-cards">
+                  {rows.map((row) => (
+                    <RecordCard
+                      key={row._id}
+                      row={row}
+                      cfg={cardCfg}
+                      fieldMap={fieldMap}
+                      selectable={selectableCards}
+                      selected={selectedRows.has(row._id)}
+                      onToggle={() => toggleCardSelect(row)}
+                      onMore={() => setDetailRow(row)}
+                    />
+                  ))}
+                </div>
+              </>
             )}
           </HeaderCtx.Provider>
 
@@ -2138,10 +2289,35 @@ const sortChanged =
         </div>
 
         <div className="dgp-foot">
-          <span className="dgp-muted">
-            Showing {startRecord.toLocaleString()}–{endRecord.toLocaleString()}{" "}
-            of {pagination.total.toLocaleString()}
-          </span>
+         <div className="flex flex-wrap items-center gap-3">
+   <label className="flex items-center gap-2 text-sm">
+  <span>Rows per page:</span>
+  <select
+    value={limit}
+    disabled={loading}
+    onChange={(e) => {
+      setLimit(Number(e.target.value));
+      setPage(1);
+    }}
+    className="rounded-md border border-gray-300 bg-white px-2 py-1.5
+      text-sm text-gray-900 outline-none focus:border-indigo-500
+      dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+  >
+    {(view === "card" ? [12, 24, 48, 96] : [10, 25, 50, 100]).map(
+      (size) => (
+        <option key={size} value={size}>
+          {size}
+        </option>
+      )
+    )}
+  </select>
+</label>
+    <span className="dgp-muted">
+      Showing {startRecord.toLocaleString()}–
+      {endRecord.toLocaleString()} of{" "}
+      {pagination.total.toLocaleString()}
+    </span>
+  </div>
 
           <nav className="dgp-pager" aria-label="Pagination">
             <button

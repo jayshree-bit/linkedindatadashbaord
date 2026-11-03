@@ -188,6 +188,7 @@ const initialState = {
   prospect: [],
   company: [],
   pagination: {},
+  latestRequestId: null,
   dashboard: { data: null, loading: false, error: null },
    global: {
     total: 0,
@@ -249,18 +250,21 @@ const slice = createSlice({
 
   extraReducers: (builder) => {
     builder
-      .addCase(fetchRows.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
+      .addCase(fetchRows.pending, (state, action) => {
+  state.loading = true;
+  state.error = null;
+  state.latestRequestId = action.meta.requestId;
+})
 
-      .addCase(fetchRows.fulfilled, (state, { payload }) => {
-        state.loading = false;
+  .addCase(fetchRows.fulfilled, (state, action) => {
+  if (state.latestRequestId !== action.meta.requestId) return; // stale response, ignore
+  const { payload } = action;
+  state.loading = false;
 
-        // Store records and pagination separately.
-        state[payload.resource] = payload.data;
-        state.pagination[payload.resource] = payload.pagination;
-      })
+  // Store records and pagination separately.
+  state[payload.resource] = payload.data;
+  state.pagination[payload.resource] = payload.pagination;
+})
 
       .addCase(addRow.fulfilled, (state, { payload }) => {
         const rows = state[payload.resource] ?? [];
