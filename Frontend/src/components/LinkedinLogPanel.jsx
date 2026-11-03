@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import DateRangeFilter from "./DateRangeFilter";
 import { getLinkedinLogsApi, exportLinkedinLogsApi } from "../services/dataService";
-
+import ChangeDiff from "./ChangeDiff";
 export const saveBlob = (blob, name) => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -137,7 +137,7 @@ export default function LinkedinLogPanel() {
         )}
 
         {/* Table */}
-        <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+          <div className="w-full  overflow-y-auto overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
           <table className="min-w-full text-left text-sm">
             <thead className="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:bg-gray-800 dark:text-gray-300">
               <tr>
@@ -146,7 +146,7 @@ export default function LinkedinLogPanel() {
                 <th className="px-3 py-2.5">Prospect</th>
                 <th className="px-3 py-2.5">LinkedIn URL</th>
                 <th className="px-3 py-2.5">Result</th>
-                <th className="px-3 py-2.5">Details</th>
+                <th className="px-3 py-2.5">Changes</th>
               </tr>
             </thead>
 
@@ -178,7 +178,14 @@ export default function LinkedinLogPanel() {
                   <td className="px-3 py-2.5">
                     <StatusBadge status={r.status} />
                   </td>
-                  <td className="px-3 py-2.5 text-gray-600 dark:text-gray-300">{r.details}</td>
+                  {/* <td className="px-3 py-2.5 text-gray-600 dark:text-gray-300">{r.details}</td> */}
+                  <td className="min-w-[320px] px-3 py-2.5 text-gray-600 dark:text-gray-300">
+  {r.changes?.length ? (
+    <ChangeDiff changes={r.changes} />
+  ) : (
+    r.details
+  )}
+</td>
                 </tr>
               ))}
 

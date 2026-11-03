@@ -1134,23 +1134,40 @@ export const exportLinkedinLogs = async (req, res, next) => {
     const q = buildLogQuery(req.query);
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('LinkedIn Update Log');
+
     ws.columns = [
       { header: 'Date & Time', key: 'createdAt', width: 22 },
       { header: 'Prospect', key: 'name', width: 28 },
       { header: 'LinkedIn URL', key: 'linkedinUrl', width: 55 },
       { header: 'Result', key: 'status', width: 16 },
       { header: 'Details', key: 'details', width: 70 },
+      { header: 'Changes', key: 'changes', width: 80 },   // <-- 1. NEW column
       { header: 'Job ID', key: 'jobId', width: 38 },
     ];
     ws.getRow(1).font = { bold: true };
 
     for await (const d of LinkedinUpdateLog.find(q).sort({ createdAt: -1 }).lean().cursor()) {
-      ws.addRow({
+      // 2. REPLACES the old ws.addRow({...}) call
+      const row = ws.addRow({
         ...d,
+        changes: '',
         createdAt: d.createdAt
           ? new Date(d.createdAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
           : '',
       });
+
+      if (d.changes?.length) {
+        const richText = [];
+        d.changes.forEach((c, i) => {
+          if (i) richText.push({ text: '\n' });
+          richText.push({ text: `${c.label}: `, font: { bold: true } });
+          richText.push({ text: c.old || '-', font: { color: { argb: 'FFDC2626' } } });
+          richText.push({ text: '  →  ' });
+          richText.push({ text: c.new, font: { color: { argb: 'FF16A34A' } } });
+        });
+        row.getCell('changes').value = { richText };
+        row.getCell('changes').alignment = { wrapText: true, vertical: 'top' };
+      }
     }
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

@@ -35,6 +35,7 @@ import ImportExcelModal from "./ImportExcelModal";
 import CompanyImportModal from "./CompanyImportModal";
 import CompanyListModal from "./CompanyListModal";
 import { saveBlob } from "./LinkedinLogPanel";
+import ChangeDiff from "./ChangeDiff";
 /* ---------- Filter model helpers ---------- */
 
 const OPERATORS = [
@@ -1834,6 +1835,7 @@ useEffect(() => {
                   <th className="p-2">Prospect</th>
                   <th className="p-2">Result</th>
                   <th className="p-2">Details</th>
+                  <th className="p-2">Changes</th>
                 </tr>
               </thead>
 
@@ -1895,6 +1897,19 @@ useEffect(() => {
                           ? res.summary ||
                             (typeof res.detail === "string" ? res.detail : "")
                           : ""}
+                      </td>
+                      <td className="p-2 min-w-[320px] text-gray-600 dark:text-gray-300">
+                        {res ? (
+                          res.diff ? (
+                            <ChangeDiff changes={res.diff} reason={res.reason} />
+                          ) : typeof res.detail === "string" ? (
+                            res.detail
+                          ) : (
+                            res.summary || ""
+                          )
+                        ) : (
+                          ""
+                        )}
                       </td>
                     </tr>
                   );
