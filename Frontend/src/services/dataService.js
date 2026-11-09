@@ -185,3 +185,7 @@ export const exportLinkedinLogsApi = (params) =>
   api
     .get("/private/prospect/linkedin-logs/export", { params, responseType: "blob" })
     .then((r) => r.data);
+
+    // Archive to the disqualified list, then delete (server only accepts DisQualified rows).
+export const deleteDisqualifiedApi = (ids) =>
+  api.post('/private/prospect/delete', { ids }).then((r) => r.data);

@@ -17,6 +17,7 @@ import {
   updateRow,
   deleteRow,
   patchLocal,
+  deleteDisqualified,
 } from "../features/dataSlice";
 import { can } from "../features/authSlice";
 import {
@@ -36,6 +37,9 @@ import CompanyImportModal from "./CompanyImportModal";
 import CompanyListModal from "./CompanyListModal";
 import { saveBlob } from "./LinkedinLogPanel";
 import ChangeDiff from "./ChangeDiff";
+// Shared UI: toast messages + confirmation modal (adjust the path if needed)
+import { useToast, useConfirm } from "./Feedbackprovider";
+
 /* ---------- Filter model helpers ---------- */
 
 const OPERATORS = [
@@ -65,14 +69,6 @@ const normKey = (k) =>
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
 
-/* ---------- Toaster (no extra package needed) ---------- */
-
-const TOAST_COLORS = {
-  success: "#16a34a",
-  error: "#dc2626",
-  warning: "#d97706",
-  info: "#2563eb",
-};
 const pageList = (page, total) => {
   const nums = new Set([1, total, page - 1, page, page + 1]);
   if (page <= 3) [2, 3, 4].forEach((n) => nums.add(n));
@@ -113,63 +109,7 @@ function useIsDark() {
   }, []);
   return dark;
 }
-function Toaster({ toasts, onClose }) {
-  if (!toasts.length) return null;
-  return createPortal(
-    <div
-      role="region"
-      aria-live="polite"
-      style={{
-        position: "fixed",
-        top: 16,
-        right: 16,
-        zIndex: 10000,
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-        maxWidth: 380,
-      }}
-    >
-      {toasts.map((t) => (
-        <div
-          key={t.id}
-          role="alert"
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            gap: 10,
-            padding: "10px 12px",
-            background: "#ffffff",
-            color: "#111827",
-            fontSize: 14,
-            lineHeight: 1.4,
-            borderRadius: 6,
-            borderLeft: `4px solid ${TOAST_COLORS[t.type] ?? TOAST_COLORS.info}`,
-            boxShadow: "0 4px 14px rgba(0, 0, 0, 0.18)",
-          }}
-        >
-          <span style={{ flex: 1 }}>{t.message}</span>
-          <button
-            type="button"
-            aria-label="Dismiss"
-            onClick={() => onClose(t.id)}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              fontSize: 18,
-              lineHeight: 1,
-              color: "#6b7280",
-            }}
-          >
-            ×
-          </button>
-        </div>
-      ))}
-    </div>,
-    document.body,
-  );
-}
+
 const LINKEDIN_JOB_KEY = "linkedinUpdateJob";
 
 const saveJobMeta = (meta) => {
@@ -191,6 +131,7 @@ const clearJobMeta = () => {
 };
 const nameOfRecord = (r) =>
   [r.firstName, r.lastName].filter(Boolean).join(" ") || r.employeeName || "—";
+
 /* ---------- Header (AG Grid style: title + sort icon + menu, then filter box) ---------- */
 
 const HeaderCtx = createContext(null);
@@ -663,6 +604,7 @@ const renderFor = (key) => {
   }
   return undefined;
 };
+
 /* ---------- Card view + details modal ---------- */
 
 const pillColor = (value) => {
@@ -688,6 +630,7 @@ function RecordCard({
   selectable,
   onToggle,
   onMore,
+  onDelete,
 }) {
   const title = cfg.title(row);
   const subtitle = cfg.subtitle?.(row);
@@ -773,9 +716,21 @@ function RecordCard({
               })}`
             : ""}
         </span>
-        <button type="button" className="dgp-btn dgp-btn-sm" onClick={onMore}>
-          View more
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {onDelete && row.status === "DisQualified" && (
+            <button
+              type="button"
+              className="dgp-btn dgp-btn-sm"
+              style={{ color: "#dc2626" }}
+              onClick={onDelete}
+            >
+              Delete
+            </button>
+          )}
+          <button type="button" className="dgp-btn dgp-btn-sm" onClick={onMore}>
+            View more
+          </button>
+        </div>
       </footer>
     </article>
   );
@@ -880,6 +835,7 @@ function RecordModal({ row, cfg, fields, onClose }) {
     document.body,
   );
 }
+
 /* ---------- Page ---------- */
 
 const NO_FIXED_FILTERS = {};
@@ -893,6 +849,8 @@ export default function DataGridPage({
   defaultSort = NO_SORT,
 }) {
   const dispatch = useDispatch();
+  const toast = useToast();
+  const confirm = useConfirm();
   const { user } = useSelector((state) => state.auth);
   const dataState = useSelector((state) => state.data);
   const isDark = useIsDark();
@@ -914,11 +872,11 @@ export default function DataGridPage({
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
   const [sortColumns, setSortColumns] = useState([
-  {
-    columnKey: "updatedAt", // Use the exact Updated At field key
-    direction: "DESC",
-  },
-]);
+    {
+      columnKey: "updatedAt", // Use the exact Updated At field key
+      direction: "DESC",
+    },
+  ]);
   const [filterModels, setFilterModels] = useState({});
   const [filters, setFilters] = useState({});
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
@@ -935,7 +893,7 @@ export default function DataGridPage({
   const sortBy = sortColumns[0]?.columnKey ?? "";
 
   const sortOrder = sortColumns[0]?.direction === "DESC" ? "desc" : "asc";
-  
+
   const [exportStatus, setExportStatus] = useState("");
   const [companyList, setCompanyList] = useState(null); // { listId, domainCount, nameCount, fileName }
   const [listError, setListError] = useState("");
@@ -968,9 +926,10 @@ export default function DataGridPage({
   const [linkedinJob, setLinkedinJob] = useState(null);
   const [linkedinQueue, setLinkedinQueue] = useState([]);
 
-  /* ---- Toasts ---- */
-  const [toasts, setToasts] = useState([]);
-  const toastId = useRef(0);
+  // The Action column calls this ref so the columns memo does not rebuild
+  // every time the delete handler changes.
+  const deleteRowRef = useRef(() => {});
+  const showActions = resource === "prospect" && canEdit;
 
   const [colQuery, setColQuery] = useState("");
   const [colMenuOpen, setColMenuOpen] = useState(false);
@@ -980,21 +939,6 @@ export default function DataGridPage({
   const [colActive, setColActive] = useState(0);
   const colFindRef = useRef(null);
   const [logOpen, setLogOpen] = useState(false);
-  
-  const dismissToast = useCallback(
-    (id) => setToasts((current) => current.filter((t) => t.id !== id)),
-    [],
-  );
-
-  // type: "success" | "error" | "warning" | "info"
-  const showToast = useCallback(
-    (message, type = "info", duration = 4500) => {
-      const id = ++toastId.current;
-      setToasts((current) => [...current.slice(-3), { id, message, type }]);
-      setTimeout(() => dismissToast(id), duration);
-    },
-    [dismissToast],
-  );
 
   const effectiveFilters = useMemo(
     () => ({
@@ -1178,6 +1122,61 @@ export default function DataGridPage({
   const columns = useMemo(() => {
     const offset = (pagination.page - 1) * pagination.limit;
 
+    // First column: Action (delete). Only DisQualified rows get a delete button.
+    const actionCol = {
+      key: "__actions",
+      name: "Action",
+      width: 80,
+      minWidth: 80,
+      maxWidth: 80,
+      frozen: true,
+      resizable: false,
+      sortable: false,
+      cellClass: "dgp-center-cell",
+      headerCellClass: "dgp-center-cell",
+      renderHeaderCell: () => <div className="agh agh-index">Action</div>,
+      renderCell: ({ row }) =>
+        row.status === "DisQualified" ? (
+          <button
+            type="button"
+            title="Delete (moves to disqualified list)"
+            aria-label="Delete prospect"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md
+              text-red-600 transition hover:bg-red-50 hover:text-red-700
+              focus:outline-none focus:ring-2 focus:ring-red-400
+              dark:hover:bg-red-900/30"
+            onClick={(e) => {
+              e.stopPropagation();
+              deleteRowRef.current(row);
+            }}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-4 w-4"
+              aria-hidden="true"
+            >
+              <path d="M3 6h18" />
+              <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+              <path d="M10 11v6M14 11v6" />
+            </svg>
+          </button>
+        ) : (
+          <span
+            className="dgp-muted"
+            title="Only DisQualified prospects can be deleted"
+          >
+            —
+          </span>
+        ),
+    };
+
     const selectCol = {
       ...SelectColumn,
       width: 48,
@@ -1232,11 +1231,18 @@ export default function DataGridPage({
     const stickyCols = dataCols.filter((c) => c.frozen);
     const otherCols = dataCols.filter((c) => !c.frozen);
 
-    return [selectCol, rowNumber, ...stickyCols, ...otherCols];
+    return [
+      ...(showActions ? [actionCol] : []),
+      selectCol,
+      rowNumber,
+      ...stickyCols,
+      ...otherCols,
+    ];
   }, [
     orderedFields,
     visibleKeys,
     canEdit,
+    showActions,
     resource,
     pagination.page,
     pagination.limit,
@@ -1310,9 +1316,8 @@ export default function DataGridPage({
         kept.add(id);
       }
       finalSet = kept;
-      showToast(
+      toast.warning(
         `You can select a maximum of ${MAX_SELECT} records at a time.`,
-        "warning",
       );
     }
 
@@ -1377,6 +1382,39 @@ export default function DataGridPage({
   const reloadRef = useRef(reloadCurrentPage);
   reloadRef.current = reloadCurrentPage;
   const pollRunRef = useRef(0);
+
+  /* ---- Delete one DisQualified prospect (archived to the disqualified list on the server) ---- */
+  const handleDeleteRow = async (row) => {
+    if (row.status !== "DisQualified") {
+      toast.warning("Only DisQualified prospects can be deleted.");
+      return;
+    }
+
+    const name = nameOfRecord(row);
+
+    const ok = await confirm({
+      title: "Delete prospect?",
+      message: `"${name}" will be moved to the disqualified list and removed from prospects.`,
+      confirmLabel: "Delete",
+      busyLabel: "Deleting...",
+      // Runs while the modal shows "Deleting...". If it throws, an error toast appears.
+      onConfirm: () => dispatch(deleteDisqualified({ ids: [row._id] })).unwrap(),
+    });
+
+    if (!ok) return;
+
+    selectedCache.current.delete(row._id);
+    setSelectedRows((prev) => {
+      const next = new Set(prev);
+      next.delete(row._id);
+      return next;
+    });
+
+    toast.success(`${name} moved to the disqualified list.`);
+    reloadCurrentPage();
+  };
+  deleteRowRef.current = handleDeleteRow;
+
   const downloadJobLog = async () => {
     try {
       const blob = await exportLinkedinLogsApi({ jobId: linkedinJob.jobId });
@@ -1386,173 +1424,174 @@ export default function DataGridPage({
       );
     } catch (err) {
       console.error("Log download failed:", err);
-      showToast(
+      toast.error(
         err?.response?.data?.message || err.message || "Log download failed.",
-        "error",
         6000,
       );
     }
   };
 
-// One polling loop, used for both a fresh start and a resume after refresh.
-const runLinkedinJob = async (jobId, total) => {
-  const runId = ++pollRunRef.current;
-  const isCurrent = () => pollRunRef.current === runId;
+  // One polling loop, used for both a fresh start and a resume after refresh.
+  const runLinkedinJob = async (jobId, total) => {
+    const runId = ++pollRunRef.current;
+    const isCurrent = () => pollRunRef.current === runId;
 
-  setLinkedinBusy(true);
-  try {
-    let last = null;
-    let seen = 0;
+    setLinkedinBusy(true);
+    try {
+      let last = null;
+      let seen = 0;
 
-    for (;;) {
-      await new Promise((r) => setTimeout(r, 1500));
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 1500));
+        if (!isCurrent()) return;
+
+        const s = await getLinkedinUpdateStatusApi(jobId);
+        if (!isCurrent()) return;
+
+        const results = Array.isArray(s.results) ? s.results : [];
+        setLinkedinJob((j) => ({
+          ...s,
+          results,
+          queue: j?.queue ?? [],
+          jobId: j?.jobId ?? jobId,
+        }));
+        setLinkedinStatus(
+          `Updating... ${s.processed ?? 0}/${s.total ?? total}`,
+        );
+
+        if (results.length > seen) {
+          seen = results.length;
+          reloadRef.current();
+        }
+
+        if (s.state === "failed") {
+          clearJobMeta();
+          throw new Error(s.error || "LinkedIn update failed");
+        }
+        if (s.state === "done" || s.state === "stopped") {
+          clearJobMeta(); // finished: a refresh will now hide the table
+          last = s;
+          break;
+        }
+      }
+
+      const results = Array.isArray(last?.results) ? last.results : [];
+      const notUpdated = results.filter(
+        (r) => r.status === "skipped" || r.status === "failed",
+      ).length;
+      const updated = results.length - notUpdated;
+
+      if (last?.state === "stopped") {
+        toast.warning(
+          `${last.error || "LinkedIn update stopped early."} (${updated} updated, ${notUpdated} skipped or failed)`,
+          9000,
+        );
+      } else if (results.length && notUpdated === results.length) {
+        toast.warning(
+          `No profiles were updated. ${notUpdated} record(s) were skipped or failed.`,
+          7000,
+        );
+      } else if (results.length && notUpdated > 0) {
+        toast.info(
+          `LinkedIn update finished: ${updated} updated, ${notUpdated} skipped or failed.`,
+          7000,
+        );
+      } else {
+        toast.success(`LinkedIn profiles updated for ${total} record(s).`);
+      }
+    } catch (err) {
       if (!isCurrent()) return;
-
-      const s = await getLinkedinUpdateStatusApi(jobId);
-      if (!isCurrent()) return;
-
-      const results = Array.isArray(s.results) ? s.results : [];
-      setLinkedinJob((j) => ({
-        ...s,
-        results,
-        queue: j?.queue ?? [],
-        jobId: j?.jobId ?? jobId,
-      }));
-      setLinkedinStatus(`Updating... ${s.processed ?? 0}/${s.total ?? total}`);
-
-      if (results.length > seen) {
-        seen = results.length;
-        reloadRef.current();
-      }
-
-      if (s.state === "failed") {
-        clearJobMeta();
-        throw new Error(s.error || "LinkedIn update failed");
-      }
-      if (s.state === "done" || s.state === "stopped") {
-        clearJobMeta(); // finished: a refresh will now hide the table
-        last = s;
-        break;
-      }
-    }
-
-    const results = Array.isArray(last?.results) ? last.results : [];
-    const notUpdated = results.filter(
-      (r) => r.status === "skipped" || r.status === "failed",
-    ).length;
-    const updated = results.length - notUpdated;
-
-    if (last?.state === "stopped") {
-      showToast(
-        `${last.error || "LinkedIn update stopped early."} (${updated} updated, ${notUpdated} skipped or failed)`,
-        "warning",
-        9000,
+      if (err?.response?.status === 404) clearJobMeta(); // server no longer knows this job
+      setLinkedinJob((j) =>
+        j ? { ...j, state: "failed", error: err.message } : j,
       );
-    } else if (results.length && notUpdated === results.length) {
-      showToast(
-        `No profiles were updated. ${notUpdated} record(s) were skipped or failed.`,
-        "warning",
+      reloadRef.current();
+      toast.error(
+        err?.response?.data?.message ||
+          err.message ||
+          "Could not update LinkedIn profiles.",
         7000,
       );
-    } else if (results.length && notUpdated > 0) {
-      showToast(
-        `LinkedIn update finished: ${updated} updated, ${notUpdated} skipped or failed.`,
-        "info",
-        7000,
-      );
-    } else {
-      showToast(`LinkedIn profiles updated for ${total} record(s).`, "success");
+    } finally {
+      if (isCurrent()) {
+        setLinkedinBusy(false);
+        setLinkedinStatus("");
+      }
     }
-  } catch (err) {
-    if (!isCurrent()) return;
-    if (err?.response?.status === 404) clearJobMeta(); // server no longer knows this job
-    setLinkedinJob((j) =>
-      j ? { ...j, state: "failed", error: err.message } : j,
-    );
-    reloadRef.current();
-    showToast(
-      err?.response?.data?.message ||
-        err.message ||
-        "Could not update LinkedIn profiles.",
-      "error",
-      7000,
-    );
-  } finally {
-    if (isCurrent()) {
+  };
+
+  const updateLinkedinProfiles = async () => {
+    const records = getSelectedRecords();
+    if (!records.length) return;
+
+    const queue = records.map((r) => ({
+      id: String(r._id),
+      name: nameOfRecord(r),
+    }));
+
+    setLinkedinQueue(queue);
+    setLinkedinBusy(true);
+    setLinkedinStatus("Starting...");
+    setLinkedinJob({
+      state: "running",
+      total: records.length,
+      processed: 0,
+      current: "",
+      results: [],
+      error: null,
+      queue,
+    });
+
+    try {
+      const started = await updateLinkedinProfilesApi(resource, records);
+      const jobId = started.jobId ?? started.job_id;
+      if (!jobId) throw new Error("No job id returned.");
+
+      saveJobMeta({ jobId, total: records.length, queue }); // survives refresh
+      setLinkedinJob((j) => (j ? { ...j, jobId } : j));
+      clearSelection();
+
+      await runLinkedinJob(jobId, records.length);
+    } catch (err) {
       setLinkedinBusy(false);
       setLinkedinStatus("");
+      setLinkedinJob((j) =>
+        j ? { ...j, state: "failed", error: err.message } : j,
+      );
+      toast.error(
+        err?.response?.data?.message ||
+          err.message ||
+          "Could not start the LinkedIn update.",
+        7000,
+      );
     }
-  }
-};
-
-const updateLinkedinProfiles = async () => {
-  const records = getSelectedRecords();
-  if (!records.length) return;
-
-  const queue = records.map((r) => ({ id: String(r._id), name: nameOfRecord(r) }));
-
-  setLinkedinQueue(queue);
-  setLinkedinBusy(true);
-  setLinkedinStatus("Starting...");
-  setLinkedinJob({
-    state: "running",
-    total: records.length,
-    processed: 0,
-    current: "",
-    results: [],
-    error: null,
-    queue,
-  });
-
-  try {
-    const started = await updateLinkedinProfilesApi(resource, records);
-    const jobId = started.jobId ?? started.job_id;
-    if (!jobId) throw new Error("No job id returned.");
-
-    saveJobMeta({ jobId, total: records.length, queue }); // survives refresh
-    setLinkedinJob((j) => (j ? { ...j, jobId } : j));
-    clearSelection();
-
-    await runLinkedinJob(jobId, records.length);
-  } catch (err) {
-    setLinkedinBusy(false);
-    setLinkedinStatus("");
-    setLinkedinJob((j) =>
-      j ? { ...j, state: "failed", error: err.message } : j,
-    );
-    showToast(
-      err?.response?.data?.message || err.message || "Could not start the LinkedIn update.",
-      "error",
-      7000,
-    );
-  }
-};
-
-// After a page refresh, pick the running job back up.
-useEffect(() => {
-  if (resource !== "prospect") return;
-  const meta = loadJobMeta();
-  if (!meta?.jobId) return;
-
-  const queue = Array.isArray(meta.queue) ? meta.queue : [];
-  setLinkedinQueue(queue);
-  setLinkedinJob({
-    state: "running",
-    total: meta.total ?? queue.length,
-    processed: 0,
-    current: "",
-    results: [],
-    error: null,
-    queue,
-    jobId: meta.jobId,
-  });
-  runLinkedinJob(meta.jobId, meta.total ?? queue.length);
-
-  return () => {
-    pollRunRef.current++; // stop the loop when leaving the page
   };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [resource]);
+
+  // After a page refresh, pick the running job back up.
+  useEffect(() => {
+    if (resource !== "prospect") return;
+    const meta = loadJobMeta();
+    if (!meta?.jobId) return;
+
+    const queue = Array.isArray(meta.queue) ? meta.queue : [];
+    setLinkedinQueue(queue);
+    setLinkedinJob({
+      state: "running",
+      total: meta.total ?? queue.length,
+      processed: 0,
+      current: "",
+      results: [],
+      error: null,
+      queue,
+      jobId: meta.jobId,
+    });
+    runLinkedinJob(meta.jobId, meta.total ?? queue.length);
+
+    return () => {
+      pollRunRef.current++; // stop the loop when leaving the page
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resource]);
 
   const onRowsChange = (newRows, { indexes }) => {
     indexes.forEach((index) => {
@@ -1609,9 +1648,9 @@ useEffect(() => {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      showToast("Export downloaded.", "success");
+      toast.success("Export downloaded.");
     } catch {
-      showToast("Export failed. Please try again.", "error", 6000);
+      toast.error("Export failed. Please try again.", 6000);
     } finally {
       setExporting(false);
       setExportStatus("");
@@ -1689,8 +1728,6 @@ useEffect(() => {
 
   return (
     <section className="dgp">
-      <Toaster toasts={toasts} onClose={dismissToast} />
-
       <div className="dgp-card dgp-head">
         <div>
           <h2 className="dgp-title">{title}</h2>
@@ -1901,7 +1938,10 @@ useEffect(() => {
                       <td className="p-2 min-w-[320px] text-gray-600 dark:text-gray-300">
                         {res ? (
                           res.diff ? (
-                            <ChangeDiff changes={res.diff} reason={res.reason} />
+                            <ChangeDiff
+                              changes={res.diff}
+                              reason={res.reason}
+                            />
                           ) : typeof res.detail === "string" ? (
                             res.detail
                           ) : (
@@ -2282,6 +2322,9 @@ useEffect(() => {
                       selected={selectedRows.has(row._id)}
                       onToggle={() => toggleCardSelect(row)}
                       onMore={() => setDetailRow(row)}
+                      onDelete={
+                        showActions ? () => handleDeleteRow(row) : undefined
+                      }
                     />
                   ))}
                 </div>
@@ -2304,35 +2347,35 @@ useEffect(() => {
         </div>
 
         <div className="dgp-foot">
-         <div className="flex flex-wrap items-center gap-3">
-   <label className="flex items-center gap-2 text-sm">
-  <span>Rows per page:</span>
-  <select
-    value={limit}
-    disabled={loading}
-    onChange={(e) => {
-      setLimit(Number(e.target.value));
-      setPage(1);
-    }}
-    className="rounded-md border border-gray-300 bg-white px-2 py-1.5
-      text-sm text-gray-900 outline-none focus:border-indigo-500
-      dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-  >
-    {(view === "card" ? [12, 24, 48, 96] : [10, 25, 50, 100]).map(
-      (size) => (
-        <option key={size} value={size}>
-          {size}
-        </option>
-      )
-    )}
-  </select>
-</label>
-    <span className="dgp-muted">
-      Showing {startRecord.toLocaleString()}–
-      {endRecord.toLocaleString()} of{" "}
-      {pagination.total.toLocaleString()}
-    </span>
-  </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm">
+              <span>Rows per page:</span>
+              <select
+                value={limit}
+                disabled={loading}
+                onChange={(e) => {
+                  setLimit(Number(e.target.value));
+                  setPage(1);
+                }}
+                className="rounded-md border border-gray-300 bg-white px-2 py-1.5
+                  text-sm text-gray-900 outline-none focus:border-indigo-500
+                  dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+              >
+                {(view === "card" ? [12, 24, 48, 96] : [10, 25, 50, 100]).map(
+                  (size) => (
+                    <option key={size} value={size}>
+                      {size}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
+            <span className="dgp-muted">
+              Showing {startRecord.toLocaleString()}–
+              {endRecord.toLocaleString()} of{" "}
+              {pagination.total.toLocaleString()}
+            </span>
+          </div>
 
           <nav className="dgp-pager" aria-label="Pagination">
             <button

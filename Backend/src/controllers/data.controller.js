@@ -1178,3 +1178,41 @@ export const exportLinkedinLogs = async (req, res, next) => {
     next(e);
   }
 };
+
+//delete prospect by id
+
+export const deleteProspects = async (req, res, next) => {
+  try {
+  
+    const ids = Array.isArray(req.body.ids) ? req.body.ids : [];
+    if (!ids.length) {
+      return res.status(400).json({ message: 'No records selected.' });
+    }
+
+    const uploader = getUploader(req);
+    const result = await svc.removeDisqualifiedProspects(ids, {
+      id: uploader.id,
+      name: uploader.name,
+    });
+
+    void logUserActivity(req, {
+      action: 'PROSPECT_DELETED',
+      description: `Deleted ${result.deleted} DisQualified prospect(s); ${result.skipped} skipped`,
+      resource: 'prospect',
+      metadata: { ...result, requested: ids.length },
+    });
+
+    if (result.deleted === 0) {
+      return res.status(400).json({
+        message: 'Only DisQualified prospects can be deleted. Nothing was deleted.',
+        ...result,
+      });
+    }
+
+    res.json({ success: true, ...result });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const getDisqualifiedList = wrap((req) => svc.listDisqualified(req.query));

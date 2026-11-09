@@ -184,6 +184,10 @@ export const importCompanies = createAsyncThunk(
     }
   }
 );
+
+export const deleteDisqualified = thunk('deleteDisqualified', async ({ ids }) =>
+  api.deleteDisqualifiedApi(ids), // -> { deleted, archived, skipped }
+);
 const initialState = {
   prospect: [],
   company: [],

@@ -8,7 +8,15 @@ const schema = new mongoose.Schema(
     linkedinUrl: String,
     status: String,
     details: String,
-    changes:String,
+    changes: [
+      {
+        _id: false,
+        field: String,
+        label: String,
+        old: String,
+        new: String,
+      },
+    ],
     createdAt: { type: Date, index: true },
   },
   { collection: 'linkedin_update_log', versionKey: false }

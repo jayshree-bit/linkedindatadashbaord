@@ -3,6 +3,8 @@ import Prospect from '../models/Prospect.js';
 import Company from '../models/Company.js';
 import User from '../models/User.js';
 import { companyLists } from '../controllers/data.controller.js';
+import DisqualifiedList from '../models/DisqualifiedList.js';
+
 const models = {
   prospect: Prospect,
   company: Company,
@@ -257,10 +259,16 @@ export const list = async (
     ? { [sortField]: sortOrder === 'desc' ? -1 : 1, _id: -1 }
     : { createdAt: -1, _id: -1 };
 
+  const recordsQuery = Model.find(filter)
+    .sort(sort)
+    .allowDiskUse(true);
+
+  if (Model.schema.path(sortField)?.instance === 'String') {
+    recordsQuery.collation({ locale: 'en', strength: 2 });
+  }
+
   const [records, total] = await Promise.all([
-    Model.find(filter)
-      .sort(sort)
-      .collation({ locale: 'en', strength: 2 })
+    recordsQuery
       .skip((currentPage - 1) * pageSize)
       .limit(pageSize)
       .lean(),
@@ -666,6 +674,97 @@ Company.countDocuments(dateMatch({ $gte: dayStart })),
       prospectsOverTime: p.overTime,
       companiesOverTime: c.overTime,
       companyRevenue: c.revenue,
+    },
+  };
+};
+
+
+
+// Remove the prospect from the disqualified list by its ID. Returns true if a document was deleted, false if not found. */
+
+export const removeDisqualifiedProspects = async (ids, actor = {}) => {
+  const validIds = [...new Set(ids)]
+    .filter((id) => mongoose.isValidObjectId(id))
+    .map((id) => new mongoose.Types.ObjectId(id));
+
+  if (!validIds.length) throw badRequest('No valid prospect ids provided');
+  if (validIds.length > 1000) throw badRequest('Max 1000 records per delete');
+
+  // Only DisQualified rows are eligible
+  const docs = await Prospect.find({
+    _id: { $in: validIds },
+    status: 'DisQualified',
+  }).lean();
+
+  const eligibleIds = docs.map((d) => d._id);
+  const skipped = validIds.length - eligibleIds.length; // not found or not DisQualified
+
+  if (!docs.length) {
+    return { deleted: 0, archived: 0, skipped };
+  }
+
+  const archiveDocs = docs.map((d) => ({
+    originalId: d._id,
+    prospect: d,
+    emailAddress: d.emailAddress || '',
+    linkedinProfileLink: String(d.linkedinProfileLink || '').toLowerCase().replace(/\/+$/, ''),
+    firstName: d.firstName || '',
+    lastName: d.lastName || '',
+    companyName: d.companyName || '',
+    primaryReason: d.primaryReason || '',
+    deletedBy: actor.id || null,
+    deletedByName: actor.name || '',
+    deletedAt: new Date(),
+  }));
+
+  // 1) Archive first. If this fails, nothing is deleted.
+  const archived = await DisqualifiedList.insertMany(archiveDocs, { ordered: false });
+
+  // 2) Delete only the ones that were actually archived (and still DisQualified)
+  const archivedIds = archived.map((a) => a.originalId);
+  const del = await Prospect.deleteMany({
+    _id: { $in: archivedIds },
+    status: 'DisQualified',
+  });
+
+  return { deleted: del.deletedCount, archived: archived.length, skipped };
+};
+
+/* List the blacklist (paginated, searchable) */
+export const listDisqualified = async ({ page = 1, limit = 20, search = '' } = {}) => {
+  const currentPage = Math.max(1, Number.parseInt(page, 10) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 20));
+
+  const filter = {};
+  const text = String(search).trim();
+  if (text) {
+    const regex = new RegExp(escapeRegex(text), 'i');
+    filter.$or = [
+      { emailAddress: regex },
+      { linkedinProfileLink: regex },
+      { firstName: regex },
+      { lastName: regex },
+      { companyName: regex },
+      { deletedByName: regex },
+    ];
+  }
+
+  const [data, total] = await Promise.all([
+    DisqualifiedList.find(filter)
+      .sort({ deletedAt: -1 })
+      .skip((currentPage - 1) * pageSize)
+      .limit(pageSize)
+      .lean(),
+    DisqualifiedList.countDocuments(filter),
+  ]);
+
+  return {
+    data,
+    pagination: {
+      page: currentPage,
+      limit: pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
     },
   };
 };

@@ -101,4 +101,7 @@ r.get(
 
 r.get('/prospect/linkedin-logs', data.getLinkedinLogs);
 r.get('/prospect/linkedin-logs/export', data.exportLinkedinLogs);
+
+r.post('/prospect/delete', data.deleteProspects);         
+r.get('/disqualified-list', data.getDisqualifiedList);
 export default r;
