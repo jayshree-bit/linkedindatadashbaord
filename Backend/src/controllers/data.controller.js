@@ -590,11 +590,74 @@ async function parseProspectsFromBuffer(buffer) {
 
   return prospects;
 }
+const NO_UPDATE = new Set([
+  "employeeName", "employeeCode", "status",
+  "uploadedBy", "uploadedByName", "importBatchId",
+]);
 
+// field -> readable label, taken from PROSPECT_COLUMN_MAP (first header wins)
+const FIELD_LABEL = {};
+for (const [header, field] of Object.entries(PROSPECT_COLUMN_MAP)) {
+  if (!FIELD_LABEL[field]) {
+    FIELD_LABEL[field] = header.replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+}
+
+// Only read the fields we compare, not whole documents.
+const DIFF_PROJECTION = Object.fromEntries(
+  [...new Set([...Object.values(PROSPECT_COLUMN_MAP), "status"])].map((f) => [f, 1]),
+);
+
+// Compares values from the Excel row with the stored record.
+const buildDiff = (existing, src) => {
+  const changes = {};
+  for (const [field, raw] of Object.entries(src)) {
+    if (NO_UPDATE.has(field)) continue;
+    let next = String(raw ?? "").trim();
+    if (!next) continue; // blank cell never overwrites data
+    if (field === "emailAddress") next = normalizeEmail(next);
+    if (field === "linkedinProfileLink") next = normalizeLinkedIn(next);
+    const old = String(existing[field] ?? "").trim();
+    if (old !== next) changes[field] = { old, new: next };
+  }
+  return changes;
+};
+
+const applyUpdates = async (ops, onChunk) => {
+  let modified = 0;
+  let failed = 0;
+  let done = 0;
+  const errors = [];
+
+  for (const part of chunk(ops, INSERT_CHUNK)) {
+    let ok = 0;
+    try {
+      const r = await Prospect.bulkWrite(part, { ordered: false });
+      ok = r.modifiedCount ?? part.length;
+    } catch (err) {
+      ok = err.result?.modifiedCount ?? err.modifiedCount ?? 0;
+      errors.push(err.message);
+    }
+    modified += ok;
+    failed += part.length - ok;
+    done += part.length;
+    onChunk?.(done);
+  }
+  return { modified, failed, errors };
+};
 // Looks up existing prospects in batches so huge $in lists stay fast.
 async function findExisting(emails, linkedinUrls, onStep) {
-  const existingEmails = new Set();
-  const existingLinkedIn = new Set();
+  const byEmail = new Map();
+  const byLinkedIn = new Map();
+
+  // Prefer a Qualified record if several share the same key.
+  const put = (map, key, doc) => {
+    if (!key) return;
+    const cur = map.get(key);
+    if (!cur || (cur.status !== "Qualified" && doc.status === "Qualified")) {
+      map.set(key, doc);
+    }
+  };
 
   const emailParts = chunk(emails, LOOKUP_CHUNK);
   const urlParts = chunk(linkedinUrls, LOOKUP_CHUNK);
@@ -604,24 +667,22 @@ async function findExisting(emails, linkedinUrls, onStep) {
   for (const part of emailParts) {
     const docs = await Prospect.find(
       { emailAddress: { $in: part } },
-      { emailAddress: 1 },
+      DIFF_PROJECTION,
     ).lean();
-    docs.forEach((d) => existingEmails.add(normalizeEmail(d.emailAddress)));
+    docs.forEach((d) => put(byEmail, normalizeEmail(d.emailAddress), d));
     onStep?.(++step, totalSteps);
   }
 
   for (const part of urlParts) {
     const docs = await Prospect.find(
       { linkedinProfileLink: { $in: part } },
-      { linkedinProfileLink: 1 },
+      DIFF_PROJECTION,
     ).lean();
-    docs.forEach((d) =>
-      existingLinkedIn.add(normalizeLinkedIn(d.linkedinProfileLink)),
-    );
+    docs.forEach((d) => put(byLinkedIn, normalizeLinkedIn(d.linkedinProfileLink), d));
     onStep?.(++step, totalSteps);
   }
 
-  return { existingEmails, existingLinkedIn };
+  return { byEmail, byLinkedIn };
 }
 
 // Adjust to your auth middleware: it must expose the logged-in user's id and display name.
@@ -734,7 +795,7 @@ return job;
       ...new Set(rows.map((p) => p.linkedinProfileLink).filter(Boolean)),
     ];
 
-    const { existingEmails, existingLinkedIn } = await findExisting(
+      const { byEmail, byLinkedIn } = await findExisting(
       emails,
       linkedinUrls,
       (done, total) => updateJob(job, { percent: scale(10, 30, done, total) }),
@@ -744,77 +805,139 @@ return job;
     const seenLinkedIn = new Set();
     const uniqueRows = [];
     const duplicates = [];
+    const updateOps = [];
+    const updatedList = [];
+    let unchangedCount = 0;
 
-    for (const row of rows) {
+    rows.forEach((row, i) => {
+      const src = parsed[i]; // original Excel values (no injected defaults)
       const email = row.emailAddress;
       const linkedin = row.linkedinProfileLink;
 
-      const inDb =
-        (email && existingEmails.has(email)) ||
-        (linkedin && existingLinkedIn.has(linkedin));
+      const existing =
+        (email && byEmail.get(email)) ||
+        (linkedin && byLinkedIn.get(linkedin)) ||
+        null;
       const inFile =
         (email && seenEmails.has(email)) ||
         (linkedin && seenLinkedIn.has(linkedin));
 
-      if (inDb || inFile) {
+      const skip = (reason) =>
         duplicates.push({
           firstName: row.firstName || "",
           lastName: row.lastName || "",
           emailAddress: email,
           linkedinProfileLink: linkedin,
-          reason: inDb
-            ? "Already exists in database"
-            : "Duplicate row in uploaded Excel",
+          reason,
         });
-        continue;
+
+      if (inFile) return skip("Duplicate row in uploaded Excel");
+
+      if (email) seenEmails.add(email);
+      if (linkedin) seenLinkedIn.add(linkedin);
+ const fileStatus = String(src.status || "").trim().toLowerCase();
+      if (fileStatus && fileStatus !== "qualified") {
+        return skip(`Status in file is "${src.status}", not Qualified`);
+      }
+      if (existing) {
+        if (existing.status !== "Qualified") {
+          return skip("Exists as DisQualified, not updated");
+        }
+
+        const changes = buildDiff(existing, src);
+        const fields = Object.keys(changes);
+        if (!fields.length) {
+          unchangedCount += 1;
+          return;
+        }
+
+        updateOps.push({
+          updateOne: {
+            filter: { _id: existing._id },
+            update: {
+              $set: Object.fromEntries(fields.map((f) => [f, changes[f].new])),
+            },
+          },
+        });
+        updatedList.push({
+          id: String(existing._id),
+          firstName: existing.firstName || "",
+          lastName: existing.lastName || "",
+          emailAddress: existing.emailAddress || email,
+          linkedinProfileLink: existing.linkedinProfileLink || linkedin,
+          changes: fields.map((f) => ({
+            field: f,
+            label: FIELD_LABEL[f] || f,
+            old: changes[f].old,
+            new: changes[f].new,
+          })),
+        });
+        return;
       }
 
       uniqueRows.push(row);
-      if (email) seenEmails.add(email);
-      if (linkedin) seenLinkedIn.add(linkedin);
-    }
-
-    updateJob(job, {
-      stage: "Saving rows",
-      percent: 30,
-      processed: 0,
-      total: uniqueRows.length,
     });
 
-    const { inserted, errors } = await insertInChunks(uniqueRows, (done) =>
+    const totalWork = updateOps.length + uniqueRows.length;
+
+    /* ---- 1) update existing ---- */
+    updateJob(job, {
+      stage: "Updating existing rows",
+      percent: 30,
+      processed: 0,
+      total: totalWork,
+    });
+
+    const upd = await applyUpdates(updateOps, (done) =>
       updateJob(job, {
         processed: done,
-        percent: scale(30, 99, done, uniqueRows.length),
+        percent: scale(30, 99, done, totalWork),
       }),
     );
 
-   updateJob(job, {
-  state: 'done',
-  percent: 100,
-  processed: uniqueRows.length,
-  result: {
-    message: 'Qualified Excel import completed.',
-    ...summary,
-    importedCount: inserted,
-    failedCount: uniqueRows.length - inserted,
-    duplicateCount: duplicates.length,
-    duplicateCheckPerformed: true,
-    duplicates: duplicates.slice(0, 500),
-    ...(errors.length && { errors: errors.slice(0, 5) }),
-  },
-});
+    /* ---- 2) insert new ---- */
+    updateJob(job, { stage: "Saving new rows" });
 
-await emitImportCompleted(io, {
-  type: 'prospect',
-  uploaderName: uploader.name || 'Unknown user',
-  totalImported: inserted,
-  qualifiedCount: inserted,
-  disqualifiedCount: 0,
-  status: 'success',
-  message: `${uploader.name || 'A user'} imported ${inserted} Qualified prospects`,
-});
+    const { inserted, errors } = await insertInChunks(uniqueRows, (done) => {
+      const all = updateOps.length + done;
+      updateJob(job, {
+        processed: all,
+        percent: scale(30, 99, all, totalWork),
+      });
+    });
 
-return job;
+    updateJob(job, {
+      state: "done",
+      percent: 100,
+      processed: totalWork,
+      result: {
+        message: "Qualified Excel import completed.",
+        ...summary,
+        importedCount: inserted,
+        updatedCount: upd.modified,
+        unchangedCount,
+        failedCount: uniqueRows.length - inserted + upd.failed,
+        duplicateCount: duplicates.length,
+        duplicateCheckPerformed: true,
+        duplicates: duplicates.slice(0, 500),
+        updated: updatedList.slice(0, 200),
+        ...((errors.length || upd.errors.length) && {
+          errors: [...errors, ...upd.errors].slice(0, 5),
+        }),
+      },
+    });
+
+    await emitImportCompleted(io, {
+      type: "prospect",
+      uploaderName: uploader.name || "Unknown user",
+      totalImported: inserted,
+      qualifiedCount: inserted,
+      disqualifiedCount: 0,
+      status: "success",
+      message: `${uploader.name || "A user"} imported ${inserted} new and updated ${upd.modified} Qualified prospects`,
+    });
+
+    return job;
   } catch (err) {
     return updateJob(job, {
       state: "failed",

@@ -54,11 +54,16 @@ const fields = [
   {key:'updatedAt', name:'Updated At'},
 ];
 const UPDATE_MARK = 'Update Profile'; // the script writes this into note1
+
 const cardConfig = {
   title: (r) =>
     [r.firstName, r.lastName].filter(Boolean).join(' ') || r.employeeName || '—',
-  subtitle: (r) => [r.specificTitle, r.companyName].filter(Boolean).join(' · '),
+
+  subtitle: (r) =>
+    [r.specificTitle, r.companyName].filter(Boolean).join(' · '),
+
   badgeKey: 'status',
+
   items: [
     'emailAddress',
     'phoneNumber',
@@ -67,6 +72,10 @@ const cardConfig = {
     'country',
     'campaign',
     'employeeName',
+    {
+      key: 'note2',
+      label: 'Work Mode',
+    },
   ],
 };
 export default function Prospects() {

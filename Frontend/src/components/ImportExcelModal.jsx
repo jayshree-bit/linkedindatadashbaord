@@ -140,7 +140,7 @@ const TEMPLATE_URL = '/templates/Sample_Import_Template.xlsx';
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:bg-slate-100"
             >
               <option value="">Select status…</option>
-              <option value="Qualified">Qualified (duplicates are skipped)</option>
+              <option value="Qualified">Qualified (existing records are updated, And New Records are Inserted)</option>
               <option value="DisQualified">DisQualified (no duplicate check)</option>
             </select>
           </label>
@@ -196,16 +196,65 @@ const TEMPLATE_URL = '/templates/Sample_Import_Template.xlsx';
           {result && (
             <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-slate-800">
               <strong className="text-green-800">{result.message}</strong>
-              <ul className="mt-1.5 list-disc space-y-0.5 pl-5">
+            <ul className="mt-1.5 list-disc space-y-0.5 pl-5">
                 <li>Status: {result.selectedStatus}</li>
                 <li>Rows in file: {result.totalRows}</li>
-                <li>Imported: {result.importedCount}</li>
-                {result.failedCount > 0 && <li>Failed: {result.failedCount}</li>}
+                <li>New imported: {result.importedCount}</li>
                 {result.duplicateCheckPerformed && (
-                  <li>Duplicates skipped: {result.duplicateCount}</li>
+                  <>
+                    <li>Existing updated: {result.updatedCount ?? 0}</li>
+                    <li>Unchanged: {result.unchangedCount ?? 0}</li>
+                    <li>Skipped: {result.duplicateCount}</li>
+                  </>
                 )}
+                {result.failedCount > 0 && <li>Failed: {result.failedCount}</li>}
               </ul>
-
+                {(result.updated ?? []).length > 0 && (
+  <div className="mt-3">
+    <div className="mb-1 text-xs font-semibold text-indigo-700">
+      Updated existing records ({result.updatedCount})
+    </div>
+    <div className="max-h-60 overflow-auto rounded-md bg-white">
+      <table className="w-full border-collapse text-xs">
+        <thead className="sticky top-0 bg-slate-100 text-left text-slate-600">
+          <tr>
+            <th className="px-2 py-1.5 font-medium">Prospect</th>
+            <th className="px-2 py-1.5 font-medium">Changes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {result.updated.map((u) => (
+            <tr key={u.id} className="border-t border-slate-100 align-top">
+              <td className="px-2 py-1.5">
+                <div className="font-medium text-slate-900">
+                  {`${u.firstName} ${u.lastName}`.trim() || '—'}
+                </div>
+                <div className="text-slate-500">
+                  {u.emailAddress || u.linkedinProfileLink}
+                </div>
+              </td>
+              <td className="px-2 py-1.5">
+                {u.changes.map((c) => (
+                  <div key={c.field}>
+                    <span className="font-medium">{c.label}: </span>
+                    <span className="text-red-600 line-through">{c.old || '—'}</span>
+                    {' → '}
+                    <span className="text-green-700">{c.new}</span>
+                  </div>
+                ))}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {result.updatedCount > result.updated.length && (
+        <div className="px-2 py-1.5 text-xs text-slate-500">
+          Showing the first {result.updated.length} of {result.updatedCount} updated records.
+        </div>
+      )}
+    </div>
+  </div>
+)}
               {duplicates.length > 0 && (
                 <div className="mt-3 max-h-52 overflow-auto rounded-md bg-white">
                   <table className="w-full border-collapse text-xs">

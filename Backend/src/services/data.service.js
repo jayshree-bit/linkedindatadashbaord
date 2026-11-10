@@ -1,9 +1,9 @@
-import mongoose from 'mongoose';
-import Prospect from '../models/Prospect.js';
-import Company from '../models/Company.js';
-import User from '../models/User.js';
-import { companyLists } from '../controllers/data.controller.js';
-import DisqualifiedList from '../models/DisqualifiedList.js';
+import mongoose from "mongoose";
+import Prospect from "../models/Prospect.js";
+import Company from "../models/Company.js";
+import User from "../models/User.js";
+import { companyLists } from "../controllers/data.controller.js";
+import DisqualifiedList from "../models/DisqualifiedList.js";
 
 const models = {
   prospect: Prospect,
@@ -23,7 +23,7 @@ const badRequest = (message) => {
   error.status = 400;
   return error;
 };
-const TZ = '+05:30';
+const TZ = "+05:30";
 const IST_MS = 330 * 60 * 1000;
 export const getModel = (name) => {
   const model = models[name];
@@ -37,19 +37,18 @@ export const getModel = (name) => {
   return model;
 };
 
-const escapeRegex = (value) =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const resolveField = (resource, key) => FIELD_MAP[resource]?.[key] ?? key;
 
 // Block operator injection ($...) and nested paths (a.b).
 const isSafeKey = (key) =>
-  typeof key === 'string' &&
+  typeof key === "string" &&
   key.length > 0 &&
   key.length <= 100 &&
-  !key.startsWith('$') &&
-  !key.includes('.') &&
-  !key.includes('\0');
+  !key.startsWith("$") &&
+  !key.includes(".") &&
+  !key.includes("\0");
 
 /* ---------- Column filters ----------
    filters = {
@@ -59,25 +58,25 @@ const isSafeKey = (key) =>
    }
 */
 const textCondition = (op, rawText) => {
-  const text = escapeRegex(String(rawText ?? '').slice(0, 200));
+  const text = escapeRegex(String(rawText ?? "").slice(0, 200));
 
   switch (op) {
-    case 'contains':
-      return text ? new RegExp(text, 'i') : null;
-    case 'notContains':
-      return text ? { $not: new RegExp(text, 'i') } : null;
-    case 'equals':
-      return text ? new RegExp(`^${text}$`, 'i') : null;
-    case 'notEqual':
-      return text ? { $not: new RegExp(`^${text}$`, 'i') } : null;
-    case 'startsWith':
-      return text ? new RegExp(`^${text}`, 'i') : null;
-    case 'endsWith':
-      return text ? new RegExp(`${text}$`, 'i') : null;
-    case 'blank':
-      return { $in: [null, ''] };
-    case 'notBlank':
-      return { $nin: [null, ''] };
+    case "contains":
+      return text ? new RegExp(text, "i") : null;
+    case "notContains":
+      return text ? { $not: new RegExp(text, "i") } : null;
+    case "equals":
+      return text ? new RegExp(`^${text}$`, "i") : null;
+    case "notEqual":
+      return text ? { $not: new RegExp(`^${text}$`, "i") } : null;
+    case "startsWith":
+      return text ? new RegExp(`^${text}`, "i") : null;
+    case "endsWith":
+      return text ? new RegExp(`${text}$`, "i") : null;
+    case "blank":
+      return { $in: [null, ""] };
+    case "notBlank":
+      return { $nin: [null, ""] };
     default:
       return null;
   }
@@ -89,7 +88,7 @@ const textCondition = (op, rawText) => {
    values list) does not cast strings the way find() does.
    An invalid id matches nothing, so a bad link never shows everyone's rows. */
 const userScopeCondition = (model) => {
-  const id = typeof model === 'string' ? model : model?.text;
+  const id = typeof model === "string" ? model : model?.text;
 
   if (!id || !mongoose.isValidObjectId(id)) {
     return { _id: { $exists: false } };
@@ -99,12 +98,12 @@ const userScopeCondition = (model) => {
 
 /* Special filter key `companyListId` (prospects only): match uploaded domains / names. */
 const COMPANY_LIST_FIELDS = {
-  prospect: { domainFields: ['companyDomain'], nameField: 'companyName' },
-  company: { domainFields: ['domain', 'website'], nameField: 'name' },
+  prospect: { domainFields: ["companyDomain"], nameField: "companyName" },
+  company: { domainFields: ["domain", "website"], nameField: "name" },
 };
 
 const companyListCondition = (resource, model) => {
-  const id = typeof model === 'string' ? model : model?.text;
+  const id = typeof model === "string" ? model : model?.text;
   const list = companyLists.get(id);
   const cfg = COMPANY_LIST_FIELDS[resource];
 
@@ -114,15 +113,18 @@ const companyListCondition = (resource, model) => {
   const or = [];
 
   if (list.domains.length) {
-    const alt = list.domains.map(escapeRegex).join('|');
+    const alt = list.domains.map(escapeRegex).join("|");
     // Stored values may carry http://, www., a trailing slash or a path (website).
-    const domainRegex = new RegExp(`^(https?://)?(www\\.)?(${alt})(/.*)?$`, 'i');
+    const domainRegex = new RegExp(
+      `^(https?://)?(www\\.)?(${alt})(/.*)?$`,
+      "i",
+    );
     for (const f of cfg.domainFields) or.push({ [f]: domainRegex });
   }
 
   if (list.names.length) {
-    const alt = list.names.map(escapeRegex).join('|');
-    or.push({ [cfg.nameField]: new RegExp(`^(${alt})$`, 'i') });
+    const alt = list.names.map(escapeRegex).join("|");
+    or.push({ [cfg.nameField]: new RegExp(`^(${alt})$`, "i") });
   }
 
   return or.length ? { $or: or } : { _id: { $exists: false } };
@@ -139,31 +141,34 @@ const parseFilters = (resource, raw) => {
   if (!raw) return [];
 
   let parsed = raw;
-  if (typeof raw === 'string') {
+  if (typeof raw === "string") {
     try {
       parsed = JSON.parse(raw);
     } catch {
       return [];
     }
   }
-  if (typeof parsed !== 'object' || parsed === null) return [];
+  if (typeof parsed !== "object" || parsed === null) return [];
 
   const conditions = [];
 
   for (const [gridKey, model] of Object.entries(parsed)) {
     // Locked "employee" filter coming from the dashboard link
-    if (resource === 'prospect' && gridKey === 'userId') {
+    if (resource === "prospect" && gridKey === "userId") {
       conditions.push(userScopeCondition(model));
       continue;
     }
 
     // Company list uploaded from Excel (domains / company names)
-   if ((resource === 'prospect' || resource === 'company') && gridKey === 'companyListId') {
+    if (
+      (resource === "prospect" || resource === "company") &&
+      gridKey === "companyListId"
+    ) {
       conditions.push(companyListCondition(resource, model));
       continue;
     }
     // Updated At date range (From / To)
-    if (resource === 'prospect' && gridKey === 'updatedAtRange') {
+    if (resource === "prospect" && gridKey === "updatedAtRange") {
       const cond = updatedRangeCondition(model);
       if (cond) conditions.push(cond);
       continue;
@@ -172,17 +177,18 @@ const parseFilters = (resource, raw) => {
     if (!isSafeKey(field)) continue;
 
     // Backwards compatible with a plain string: { "City": "pune" }
-    const m = typeof model === 'string' ? { op: 'contains', text: model } : model;
-    if (!m || typeof m !== 'object') continue;
+    const m =
+      typeof model === "string" ? { op: "contains", text: model } : model;
+    if (!m || typeof m !== "object") continue;
 
-    const textCond = textCondition(m.op ?? 'contains', m.text);
+    const textCond = textCondition(m.op ?? "contains", m.text);
     if (textCond) conditions.push({ [field]: textCond });
 
     if (Array.isArray(m.values)) {
       const values = m.values.slice(0, 500);
       // A "(Blanks)" selection (null or '') must match both missing and empty values.
-      const wantsBlank = values.some((v) => v === null || v === '');
-      const list = wantsBlank ? [...values, null, ''] : values;
+      const wantsBlank = values.some((v) => v === null || v === "");
+      const list = wantsBlank ? [...values, null, ""] : values;
       conditions.push({ [field]: { $in: list } });
     }
   }
@@ -190,18 +196,18 @@ const parseFilters = (resource, raw) => {
   return conditions;
 };
 
-const buildFilter = (resource, { search = '', filters = '' } = {}) => {
+const buildFilter = (resource, { search = "", filters = "" } = {}) => {
   const filter = {};
 
   const conditions = parseFilters(resource, filters);
-  
+
   if (conditions.length) filter.$and = conditions;
 
   const searchText = String(search).trim();
   if (searchText) {
-    const regex = new RegExp(escapeRegex(searchText), 'i');
+    const regex = new RegExp(escapeRegex(searchText), "i");
 
-    if (resource === 'prospect') {
+    if (resource === "prospect") {
       filter.$or = [
         { employeeCode: regex },
         { employeeName: regex },
@@ -219,7 +225,7 @@ const buildFilter = (resource, { search = '', filters = '' } = {}) => {
         { status: regex },
         { primaryReason: regex },
       ];
-    } else if (resource === 'company') {
+    } else if (resource === "company") {
       filter.$or = [
         { name: regex },
         { companyName: regex },
@@ -238,33 +244,28 @@ export const list = async (
   {
     page = 1,
     limit = 10,
-    search = '',
-    sortBy = '',
-    sortOrder = 'asc',
-    filters = '',
-  } = {}
+    search = "",
+    sortBy = "",
+    sortOrder = "asc",
+    filters = "",
+  } = {},
 ) => {
   const Model = getModel(resource);
 
   const currentPage = Math.max(1, Number.parseInt(page, 10) || 1);
-  const pageSize = Math.min(
-    100,
-    Math.max(1, Number.parseInt(limit, 10) || 10)
-  );
+  const pageSize = Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 10));
 
   const filter = buildFilter(resource, { search, filters });
 
   const sortField = resolveField(resource, sortBy);
   const sort = isSafeKey(sortField)
-    ? { [sortField]: sortOrder === 'desc' ? -1 : 1, _id: -1 }
+    ? { [sortField]: sortOrder === "desc" ? -1 : 1, _id: -1 }
     : { createdAt: -1, _id: -1 };
 
-  const recordsQuery = Model.find(filter)
-    .sort(sort)
-    .allowDiskUse(true);
+  const recordsQuery = Model.find(filter).sort(sort).allowDiskUse(true);
 
-  if (Model.schema.path(sortField)?.instance === 'String') {
-    recordsQuery.collation({ locale: 'en', strength: 2 });
+  if (Model.schema.path(sortField)?.instance === "String") {
+    recordsQuery.collation({ locale: "en", strength: 2 });
   }
 
   const [records, total] = await Promise.all([
@@ -295,18 +296,18 @@ export const list = async (
 export const distinct = async (
   resource,
   gridKey,
-  { search = '', filters = '', valueSearch = '', limit = 200 } = {}
+  { search = "", filters = "", valueSearch = "", limit = 200 } = {},
 ) => {
   const Model = getModel(resource);
 
   const field = resolveField(resource, gridKey);
-  if (!isSafeKey(field)) throw badRequest('Invalid field');
+  if (!isSafeKey(field)) throw badRequest("Invalid field");
 
   const max = Math.min(500, Math.max(1, Number.parseInt(limit, 10) || 200));
   const filter = buildFilter(resource, { search, filters });
   const own = String(valueSearch).trim().slice(0, 100);
 
-  const raw = { $getField: { field, input: '$$ROOT' } };
+  const raw = { $getField: { field, input: "$$ROOT" } };
   const pipeline = [];
 
   if (Object.keys(filter).length) pipeline.push({ $match: filter });
@@ -314,12 +315,13 @@ export const distinct = async (
   pipeline.push({
     $group: {
       _id: {
-        $cond: [{ $in: [{ $ifNull: [raw, null] }, [null, '']] }, null, raw],
+        $cond: [{ $in: [{ $ifNull: [raw, null] }, [null, ""]] }, null, raw],
       },
     },
   });
 
-  if (own) pipeline.push({ $match: { _id: new RegExp(escapeRegex(own), 'i') } });
+  if (own)
+    pipeline.push({ $match: { _id: new RegExp(escapeRegex(own), "i") } });
 
   pipeline.push({ $sort: { _id: 1 } }, { $limit: max + 1 });
 
@@ -339,15 +341,15 @@ export const fieldFor = (resource, gridKey) => resolveField(resource, gridKey);
 
 export const exportCursor = (
   resource,
-  { search = '', sortBy = '', sortOrder = 'asc', filters = '' } = {},
-  dbFields = []
+  { search = "", sortBy = "", sortOrder = "asc", filters = "" } = {},
+  dbFields = [],
 ) => {
   const Model = getModel(resource);
   const filter = buildFilter(resource, { search, filters });
 
   const sortField = resolveField(resource, sortBy);
   const sort = isSafeKey(sortField)
-    ? { [sortField]: sortOrder === 'desc' ? -1 : 1, _id: -1 }
+    ? { [sortField]: sortOrder === "desc" ? -1 : 1, _id: -1 }
     : { createdAt: -1, _id: -1 };
 
   // Fetch only the columns being exported
@@ -365,25 +367,19 @@ export const exportCursor = (
     .cursor();
 };
 
-export const create = (resource, data) =>
-  getModel(resource).create(data);
+export const create = (resource, data) => getModel(resource).create(data);
 
 export const update = (resource, id, data) =>
   getModel(resource).findByIdAndUpdate(
     id,
     { $set: data },
-    { new: true, runValidators: true }
+    { new: true, runValidators: true },
   );
 
 export const remove = (resource, id) =>
   getModel(resource).findByIdAndDelete(id);
 
-
-
 /* India has no DST, so a fixed +05:30 offset is safe. */
-
-
-
 
 /* Monday 00:00 (IST) of the current week, as a UTC Date. */
 const startOfWeek = () => {
@@ -407,7 +403,8 @@ const dateMatch = (range) => {
 
   const idRange = {};
   if (range.$gte) idRange.$gte = idFromDate(range.$gte);
-  if (range.$lte) idRange.$lt = idFromDate(new Date(range.$lte.getTime() + 1000));
+  if (range.$lte)
+    idRange.$lt = idFromDate(new Date(range.$lte.getTime() + 1000));
 
   return {
     $or: [
@@ -416,15 +413,15 @@ const dateMatch = (range) => {
     ],
   };
 };
-const createdOrId = { $ifNull: ['$createdAt', { $toDate: '$_id' }] };
+const createdOrId = { $ifNull: ["$createdAt", { $toDate: "$_id" }] };
 const exactRevenueText = {
   $toLower: {
     $trim: {
       input: {
         $toString: {
           $ifNull: [
-            { $getField: { field: 'Exact Revenue', input: '$$ROOT' } },
-            { $ifNull: ['$exactRevenue', ''] },
+            { $getField: { field: "Exact Revenue", input: "$$ROOT" } },
+            { $ifNull: ["$exactRevenue", ""] },
           ],
         },
       },
@@ -437,12 +434,14 @@ const parseRange = ({ from, to }) => {
 
   if (from) {
     const d = new Date(`${from}T00:00:00.000${TZ}`);
-    if (Number.isNaN(d.getTime())) throw badRequest('Invalid "from" date, use YYYY-MM-DD');
+    if (Number.isNaN(d.getTime()))
+      throw badRequest('Invalid "from" date, use YYYY-MM-DD');
     range.$gte = d;
   }
   if (to) {
     const d = new Date(`${to}T23:59:59.999${TZ}`);
-    if (Number.isNaN(d.getTime())) throw badRequest('Invalid "to" date, use YYYY-MM-DD');
+    if (Number.isNaN(d.getTime()))
+      throw badRequest('Invalid "to" date, use YYYY-MM-DD');
     range.$lte = d;
   }
   if (range.$gte && range.$lte && range.$gte > range.$lte) {
@@ -454,7 +453,7 @@ const parseRange = ({ from, to }) => {
 
 /* Group by a text field, ignoring case and blanks, newest label wins. */
 const groupByText = (field, limit) => [
-  { $match: { [field]: { $nin: [null, ''] } } },
+  { $match: { [field]: { $nin: [null, ""] } } },
   {
     $group: {
       _id: { $toLower: { $trim: { input: `$${field}` } } },
@@ -468,14 +467,16 @@ const groupByText = (field, limit) => [
 ];
 /* Group by employeeName (case-insensitive), with qualified / disqualified split. */
 const groupByEmployeeName = (limit) => [
-  { $match: { employeeName: { $nin: [null, ''] } } },
+  { $match: { employeeName: { $nin: [null, ""] } } },
   {
     $group: {
-      _id: { $toLower: { $trim: { input: '$employeeName' } } },
-      label: { $first: '$employeeName' },
+      _id: { $toLower: { $trim: { input: "$employeeName" } } },
+      label: { $first: "$employeeName" },
       count: { $sum: 1 },
-      qualified: { $sum: { $cond: [{ $eq: ['$status', 'Qualified'] }, 1, 0] } },
-      disqualified: { $sum: { $cond: [{ $eq: ['$status', 'DisQualified'] }, 1, 0] } },
+      qualified: { $sum: { $cond: [{ $eq: ["$status", "Qualified"] }, 1, 0] } },
+      disqualified: {
+        $sum: { $cond: [{ $eq: ["$status", "DisQualified"] }, 1, 0] },
+      },
     },
   },
   { $sort: { count: -1, _id: 1 } },
@@ -485,12 +486,14 @@ const groupByEmployeeName = (limit) => [
 const dailyCounts = [
   {
     $group: {
-      _id: { $dateToString: { format: '%Y-%m-%d', date: createdOrId, timezone: TZ } },
+      _id: {
+        $dateToString: { format: "%Y-%m-%d", date: createdOrId, timezone: TZ },
+      },
       count: { $sum: 1 },
     },
   },
   { $sort: { _id: 1 } },
-  { $project: { _id: 0, date: '$_id', count: 1 } },
+  { $project: { _id: 0, date: "$_id", count: 1 } },
 ];
 
 /* exactRevenue is stored as a string, so turn "1,200,000" / "$1200000" into a number.
@@ -501,13 +504,14 @@ const revenueNumber = {
       m: {
         $regexFind: {
           input: exactRevenueText,
-          regex: '^\\$?\\s*([0-9][0-9,]*\\.?[0-9]*)\\s*(billion|bn|b|million|mn|m|thousand|k)?\\+?$',
+          regex:
+            "^\\$?\\s*([0-9][0-9,]*\\.?[0-9]*)\\s*(billion|bn|b|million|mn|m|thousand|k)?\\+?$",
         },
       },
     },
     in: {
       $cond: [
-        { $eq: ['$$m', null] },
+        { $eq: ["$$m", null] },
         null,
         {
           $multiply: [
@@ -515,12 +519,12 @@ const revenueNumber = {
               $convert: {
                 input: {
                   $replaceAll: {
-                    input: { $arrayElemAt: ['$$m.captures', 0] },
-                    find: ',',
-                    replacement: '',
+                    input: { $arrayElemAt: ["$$m.captures", 0] },
+                    find: ",",
+                    replacement: "",
                   },
                 },
-                to: 'double',
+                to: "double",
                 onError: null,
                 onNull: null,
               },
@@ -528,14 +532,25 @@ const revenueNumber = {
             {
               $let: {
                 vars: {
-                  unit: { $ifNull: [{ $arrayElemAt: ['$$m.captures', 1] }, ''] },
+                  unit: {
+                    $ifNull: [{ $arrayElemAt: ["$$m.captures", 1] }, ""],
+                  },
                 },
                 in: {
                   $switch: {
                     branches: [
-                      { case: { $in: ['$$unit', ['billion', 'bn', 'b']] }, then: 1e9 },
-                      { case: { $in: ['$$unit', ['million', 'mn', 'm']] }, then: 1e6 },
-                      { case: { $in: ['$$unit', ['thousand', 'k']] }, then: 1e3 },
+                      {
+                        case: { $in: ["$$unit", ["billion", "bn", "b"]] },
+                        then: 1e9,
+                      },
+                      {
+                        case: { $in: ["$$unit", ["million", "mn", "m"]] },
+                        then: 1e6,
+                      },
+                      {
+                        case: { $in: ["$$unit", ["thousand", "k"]] },
+                        then: 1e3,
+                      },
                     ],
                     default: 1,
                   },
@@ -551,17 +566,17 @@ const revenueNumber = {
 
 const companyLabel = {
   $ifNull: [
-    { $getField: { field: 'Company Name', input: '$$ROOT' } },
-    { $ifNull: ['$companyName', { $ifNull: ['$name', '$domain'] }] },
+    { $getField: { field: "Company Name", input: "$$ROOT" } },
+    { $ifNull: ["$companyName", { $ifNull: ["$name", "$domain"] }] },
   ],
 };
 
 export const getDashboard = async ({ from, to, limit = 10 } = {}) => {
   const top = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 10));
   const range = parseRange({ from, to });
-const rangeMatch = dateMatch(range);
-const weekStart = startOfWeek();
-const dayStart = startOfToday();
+  const rangeMatch = dateMatch(range);
+  const weekStart = startOfWeek();
+  const dayStart = startOfToday();
 
   const [
     totalProspects,
@@ -575,29 +590,33 @@ const dayStart = startOfToday();
   ] = await Promise.all([
     Prospect.estimatedDocumentCount(),
     Company.estimatedDocumentCount(),
-  Prospect.countDocuments(dateMatch({ $gte: weekStart })),
-Company.countDocuments(dateMatch({ $gte: weekStart })),
-Prospect.countDocuments(dateMatch({ $gte: dayStart })),
-Company.countDocuments(dateMatch({ $gte: dayStart })),
+    Prospect.countDocuments(dateMatch({ $gte: weekStart })),
+    Company.countDocuments(dateMatch({ $gte: weekStart })),
+    Prospect.countDocuments(dateMatch({ $gte: dayStart })),
+    Company.countDocuments(dateMatch({ $gte: dayStart })),
 
     Prospect.aggregate([
       { $match: rangeMatch },
       {
         $facet: {
-          count: [{ $count: 'n' }],
-          byCountry: groupByText('country', top),
-          byCompany: groupByText('companyName', top),
-          byEmployeeSize: groupByText('employeeSize', top),
-          byJobLevel: groupByText('jobLevel', top),          // NEW
-          byEmployeeName: groupByEmployeeName(top),          // NEW
+          count: [{ $count: "n" }],
+          byCountry: groupByText("country", top),
+          byCompany: groupByText("companyName", top),
+          byEmployeeSize: groupByText("employeeSize", top),
+          byJobLevel: groupByText("jobLevel", top), // NEW
+          byEmployeeName: groupByEmployeeName(top), // NEW
           byEmployee: [
             {
               $group: {
-                _id: '$uploadedBy',
+                _id: "$uploadedBy",
                 count: { $sum: 1 },
-                qualified: { $sum: { $cond: [{ $eq: ['$status', 'Qualified'] }, 1, 0] } },
-                disqualified: { $sum: { $cond: [{ $eq: ['$status', 'DisQualified'] }, 1, 0] } },
-                employeeName: { $first: '$employeeName' },
+                qualified: {
+                  $sum: { $cond: [{ $eq: ["$status", "Qualified"] }, 1, 0] },
+                },
+                disqualified: {
+                  $sum: { $cond: [{ $eq: ["$status", "DisQualified"] }, 1, 0] },
+                },
+                employeeName: { $first: "$employeeName" },
               },
             },
             { $sort: { count: -1 } },
@@ -612,7 +631,7 @@ Company.countDocuments(dateMatch({ $gte: dayStart })),
       { $match: rangeMatch },
       {
         $facet: {
-          count: [{ $count: 'n' }],
+          count: [{ $count: "n" }],
           overTime: dailyCounts,
           revenue: [
             { $addFields: { revenueValue: revenueNumber } },
@@ -621,11 +640,16 @@ Company.countDocuments(dateMatch({ $gte: dayStart })),
             { $limit: top },
             {
               $project: {
-    _id: 0,
-    label: companyLabel,
-    revenue: '$revenueValue',
-    revenueRange: { $ifNull: [{ $getField: { field: 'Revenue', input: '$$ROOT' } }, '$revenue'] },
-  },
+                _id: 0,
+                label: companyLabel,
+                revenue: "$revenueValue",
+                revenueRange: {
+                  $ifNull: [
+                    { $getField: { field: "Revenue", input: "$$ROOT" } },
+                    "$revenue",
+                  ],
+                },
+              },
             },
           ],
         },
@@ -636,7 +660,9 @@ Company.countDocuments(dateMatch({ $gte: dayStart })),
   /* Names for the "prospects by employee" chart. */
   const ids = p.byEmployee.map((r) => r._id).filter(Boolean);
   const users = ids.length
-    ? await User.find({ _id: { $in: ids } }).select('name email').lean()
+    ? await User.find({ _id: { $in: ids } })
+        .select("name email")
+        .lean()
     : [];
   const userById = new Map(users.map((u) => [String(u._id), u]));
 
@@ -644,7 +670,7 @@ Company.countDocuments(dateMatch({ $gte: dayStart })),
     const u = r._id ? userById.get(String(r._id)) : null;
     return {
       userId: r._id || null,
-      label: u?.name || u?.email || r.employeeName || 'Unassigned',
+      label: u?.name || u?.email || r.employeeName || "Unassigned",
       count: r.count,
       qualified: r.qualified,
       disqualified: r.disqualified,
@@ -669,7 +695,7 @@ Company.countDocuments(dateMatch({ $gte: dayStart })),
       prospectsByCompany: p.byCompany,
       prospectsByEmployee: byEmployee,
       prospectsByEmployeeName: p.byEmployeeName,
-      prospectsByJobLevel: p.byJobLevel, 
+      prospectsByJobLevel: p.byJobLevel,
       prospectsByEmployeeSize: p.byEmployeeSize,
       prospectsOverTime: p.overTime,
       companiesOverTime: c.overTime,
@@ -678,8 +704,6 @@ Company.countDocuments(dateMatch({ $gte: dayStart })),
   };
 };
 
-
-
 // Remove the prospect from the disqualified list by its ID. Returns true if a document was deleted, false if not found. */
 
 export const removeDisqualifiedProspects = async (ids, actor = {}) => {
@@ -687,13 +711,13 @@ export const removeDisqualifiedProspects = async (ids, actor = {}) => {
     .filter((id) => mongoose.isValidObjectId(id))
     .map((id) => new mongoose.Types.ObjectId(id));
 
-  if (!validIds.length) throw badRequest('No valid prospect ids provided');
-  if (validIds.length > 1000) throw badRequest('Max 1000 records per delete');
+  if (!validIds.length) throw badRequest("No valid prospect ids provided");
+  if (validIds.length > 1000) throw badRequest("Max 1000 records per delete");
 
   // Only DisQualified rows are eligible
   const docs = await Prospect.find({
     _id: { $in: validIds },
-    status: 'DisQualified',
+    status: "DisQualified",
   }).lean();
 
   const eligibleIds = docs.map((d) => d._id);
@@ -706,39 +730,47 @@ export const removeDisqualifiedProspects = async (ids, actor = {}) => {
   const archiveDocs = docs.map((d) => ({
     originalId: d._id,
     prospect: d,
-    emailAddress: d.emailAddress || '',
-    linkedinProfileLink: String(d.linkedinProfileLink || '').toLowerCase().replace(/\/+$/, ''),
-    firstName: d.firstName || '',
-    lastName: d.lastName || '',
-    companyName: d.companyName || '',
-    primaryReason: d.primaryReason || '',
+    emailAddress: d.emailAddress || "",
+    linkedinProfileLink: String(d.linkedinProfileLink || "")
+      .toLowerCase()
+      .replace(/\/+$/, ""),
+    firstName: d.firstName || "",
+    lastName: d.lastName || "",
+    companyName: d.companyName || "",
+    primaryReason: d.primaryReason || "",
     deletedBy: actor.id || null,
-    deletedByName: actor.name || '',
+    deletedByName: actor.name || "",
     deletedAt: new Date(),
   }));
 
   // 1) Archive first. If this fails, nothing is deleted.
-  const archived = await DisqualifiedList.insertMany(archiveDocs, { ordered: false });
+  const archived = await DisqualifiedList.insertMany(archiveDocs, {
+    ordered: false,
+  });
 
   // 2) Delete only the ones that were actually archived (and still DisQualified)
   const archivedIds = archived.map((a) => a.originalId);
   const del = await Prospect.deleteMany({
     _id: { $in: archivedIds },
-    status: 'DisQualified',
+    status: "DisQualified",
   });
 
   return { deleted: del.deletedCount, archived: archived.length, skipped };
 };
 
 /* List the blacklist (paginated, searchable) */
-export const listDisqualified = async ({ page = 1, limit = 20, search = '' } = {}) => {
+export const listDisqualified = async ({
+  page = 1,
+  limit = 20,
+  search = "",
+} = {}) => {
   const currentPage = Math.max(1, Number.parseInt(page, 10) || 1);
   const pageSize = Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 20));
 
   const filter = {};
   const text = String(search).trim();
   if (text) {
-    const regex = new RegExp(escapeRegex(text), 'i');
+    const regex = new RegExp(escapeRegex(text), "i");
     filter.$or = [
       { emailAddress: regex },
       { linkedinProfileLink: regex },

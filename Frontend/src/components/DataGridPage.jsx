@@ -129,6 +129,14 @@ const clearJobMeta = () => {
     localStorage.removeItem(LINKEDIN_JOB_KEY);
   } catch {}
 };
+const formatDuration = (ms) => {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return h ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+};
 const nameOfRecord = (r) =>
   [r.firstName, r.lastName].filter(Boolean).join(" ") || r.employeeName || "—";
 
@@ -684,26 +692,36 @@ function RecordCard({
       </header>
 
       <dl className="dgp-ci-body">
-        {cfg.items.map((key) => {
-          const f = fieldMap.get(key);
-          if (!f) return null;
-          const render = renderFor(key);
-          const value = row[key];
-          return (
-            <div key={key} className="dgp-ci-row">
-              <dt>{f.name}</dt>
-              <dd>
-                {isBlankValue(value) ? (
-                  <span className="dgp-ci-empty">—</span>
-                ) : render ? (
-                  render({ row })
-                ) : (
-                  String(value)
-                )}
-              </dd>
-            </div>
-          );
-        })}
+        {cfg.items.map((item) => {
+  // Support both string keys and { key, label } objects
+  const key = typeof item === "string" ? item : item.key;
+
+  const f = fieldMap.get(key);
+  if (!f) return null;
+
+  const label =
+    typeof item === "object" && item.label
+      ? item.label
+      : f.name;
+
+  const render = renderFor(key);
+  const value = row[key];
+
+  return (
+    <div key={key} className="dgp-ci-row">
+      <dt>{label}</dt>
+      <dd>
+        {isBlankValue(value) ? (
+          <span className="dgp-ci-empty">—</span>
+        ) : render ? (
+          render({ row })
+        ) : (
+          String(value)
+        )}
+      </dd>
+    </div>
+  );
+})}
       </dl>
 
       <footer className="dgp-ci-foot">
@@ -925,7 +943,16 @@ export default function DataGridPage({
   const [linkedinStatus, setLinkedinStatus] = useState("");
   const [linkedinJob, setLinkedinJob] = useState(null);
   const [linkedinQueue, setLinkedinQueue] = useState([]);
-
+  const [jobStartedAt, setJobStartedAt] = useState(null);
+const [jobEndedAt, setJobEndedAt] = useState(null);
+const [now, setNow] = useState(() => Date.now());
+// Timing stats for the LinkedIn job panel
+const elapsedMs = jobStartedAt ? (jobEndedAt ?? now) - jobStartedAt : 0;
+const doneCount = linkedinJob?.results?.length ?? 0;
+const avgMs = doneCount ? elapsedMs / doneCount : 0;
+const remainingCount = Math.max(0, (linkedinJob?.total ?? 0) - doneCount);
+const etaMs =
+  linkedinJob?.state === "running" && doneCount ? avgMs * remainingCount : null;
   // The Action column calls this ref so the columns memo does not rebuild
   // every time the delete handler changes.
   const deleteRowRef = useRef(() => {});
@@ -965,6 +992,13 @@ export default function DataGridPage({
     }, 350);
     return () => clearTimeout(timer);
   }, [searchInput]);
+
+  // Re-render once a second while a job is running
+useEffect(() => {
+  if (!jobStartedAt || jobEndedAt) return;
+  const t = setInterval(() => setNow(Date.now()), 1000);
+  return () => clearInterval(t);
+}, [jobStartedAt, jobEndedAt]);
   useEffect(() => {
     setSelectedRows(new Set());
   }, [resource, search, effectiveFilters]);
@@ -1464,15 +1498,17 @@ export default function DataGridPage({
           reloadRef.current();
         }
 
-        if (s.state === "failed") {
-          clearJobMeta();
-          throw new Error(s.error || "LinkedIn update failed");
-        }
-        if (s.state === "done" || s.state === "stopped") {
-          clearJobMeta(); // finished: a refresh will now hide the table
-          last = s;
-          break;
-        }
+      if (s.state === "failed") {
+        setJobEndedAt((e) => e ?? Date.now());
+        clearJobMeta();
+        throw new Error(s.error || "LinkedIn update failed");
+      }
+      if (s.state === "done" || s.state === "stopped") {
+        setJobEndedAt((e) => e ?? Date.now());
+        clearJobMeta();
+        last = s;
+        break;
+      }
       }
 
       const results = Array.isArray(last?.results) ? last.results : [];
@@ -1530,6 +1566,10 @@ export default function DataGridPage({
     }));
 
     setLinkedinQueue(queue);
+    const startedAt = Date.now();
+setJobStartedAt(startedAt);
+setJobEndedAt(null);
+setNow(startedAt);
     setLinkedinBusy(true);
     setLinkedinStatus("Starting...");
     setLinkedinJob({
@@ -1547,7 +1587,7 @@ export default function DataGridPage({
       const jobId = started.jobId ?? started.job_id;
       if (!jobId) throw new Error("No job id returned.");
 
-      saveJobMeta({ jobId, total: records.length, queue }); // survives refresh
+      saveJobMeta({ jobId, total: records.length, queue,startedAt  }); // survives refresh
       setLinkedinJob((j) => (j ? { ...j, jobId } : j));
       clearSelection();
 
@@ -1558,6 +1598,7 @@ export default function DataGridPage({
       setLinkedinJob((j) =>
         j ? { ...j, state: "failed", error: err.message } : j,
       );
+      setJobEndedAt((e) => e ?? Date.now());
       toast.error(
         err?.response?.data?.message ||
           err.message ||
@@ -1586,7 +1627,10 @@ export default function DataGridPage({
       jobId: meta.jobId,
     });
     runLinkedinJob(meta.jobId, meta.total ?? queue.length);
-
+    setJobStartedAt(meta.startedAt ?? Date.now());
+    setJobEndedAt(null);
+    setNow(Date.now());
+ 
     return () => {
       pollRunRef.current++; // stop the loop when leaving the page
     };
@@ -1819,6 +1863,27 @@ export default function DataGridPage({
               {linkedinJob.state === "stopped" && " (stopped)"}
               {linkedinJob.state === "failed" && " (failed)"}
             </strong>
+            {jobStartedAt && (
+  <div
+    className="dgp-muted"
+    style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 8 }}
+  >
+    <span>
+      {jobEndedAt ? "Total time" : "Elapsed"}:{" "}
+      <strong>{formatDuration(elapsedMs)}</strong>
+    </span>
+    {doneCount > 0 && (
+      <span>
+        Avg per profile: <strong>{formatDuration(avgMs)}</strong>
+      </span>
+    )}
+    {etaMs != null && (
+      <span>
+        Est. remaining: <strong>~{formatDuration(etaMs)}</strong>
+      </span>
+    )}
+  </div>
+)}
             {!linkedinBusy && (
               <div style={{ display: "flex", gap: 8 }}>
                 {linkedinJob.jobId && (
@@ -2036,6 +2101,9 @@ export default function DataGridPage({
                 onClick={() => {
                   setHighlightKey(null);
                   setColQuery("");
+                   setLinkedinJob(null);
+  setJobStartedAt(null);
+  setJobEndedAt(null);
                 }}
               >
                 Clear
