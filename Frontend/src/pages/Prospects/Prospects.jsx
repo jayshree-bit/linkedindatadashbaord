@@ -43,6 +43,7 @@ const fields = [
   { key: 'dispositions', name: 'Dispositions' },
   { key: 'note1', name: 'Note 1' },
   { key: 'note2', name: 'Note 2' },
+  { key: 'companySocials', name: 'Company Socials' },
   { key: 'note3', name: 'Note 3' },
   { key: 'status', name: 'Status' },
   { key: 'primaryReason', name: 'Primary Reason' },
@@ -75,6 +76,10 @@ const cardConfig = {
     {
       key: 'note2',
       label: 'Work Mode',
+    },
+     {
+      key: 'companySocials',
+      label: 'Company Socials',
     },
   ],
 };

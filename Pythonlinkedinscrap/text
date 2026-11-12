@@ -3,7 +3,7 @@ Windows backend setup:
 py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r Backend\requirements-windows.txt
 .\.venv\Scripts\python.exe -m uvicorn Backend.backend.main:app --reload --host 127.0.0.1 --port 5000
-.\.venv\Scripts\python.exe -m uvicorn main:app --reload --host 0.0.0.0 --port 5000
+.\.venv\Scripts\python.exe -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 Or run from the project root:
 

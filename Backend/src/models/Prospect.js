@@ -79,7 +79,7 @@ const prospectSchema = new mongoose.Schema(
     note1: { type: String, trim: true, default: "" },
     note2: { type: String, trim: true, default: "" },
     note3: { type: String, trim: true, default: "" },
-
+    companySocials: { type: String, trim: true, default: "" },
     status: {
       type: String,
       enum: ["Qualified", "DisQualified"],

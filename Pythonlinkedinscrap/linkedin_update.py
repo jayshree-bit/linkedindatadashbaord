@@ -190,6 +190,54 @@ def old_value(doc: dict, key: str):
         return pick(doc, FIELD_KEYS[key])
     return doc.get(key)
 
+def _company_slug(url) -> str:
+    """https://www.linkedin.com/company/intone-networks-inc/about/ -> intone-networks-inc"""
+    m = re.search(r"/company/([^/?#]+)", (url or "").strip(), re.I)
+    return m.group(1).lower() if m else ""
+
+
+def _site_host(url) -> str:
+    """https://www.fourwindscasino.com/ -> fourwindscasino.com (ignores http/https and www)"""
+    url = (url or "").strip().lower()
+    p = urlparse(url if "//" in url else "//" + url)
+    host = (p.netloc or "").split("@")[-1].split(":")[0]
+    return host.removeprefix("www.")
+
+
+def _numbers(text) -> tuple:
+    """'501-1,000 employees' -> ('501', '1000'); '10,001+ employees' -> ('10001',)"""
+    return tuple(n.replace(",", "") for n in re.findall(r"\d[\d,]*", text or ""))
+
+def _tenure_core(text) -> str:
+    """Tenure without the '14 yrs 6 mos' part, lower-case, no spaces or symbols."""
+    return norm(DURATION_RE.sub(" ", text or ""))
+
+def same_value(key: str, old, new) -> bool:
+    """True when old and new mean the same thing, so the field must NOT be updated."""
+    if blank(old) or blank(new):
+        return False  # empty old value -> still fill it
+
+    if key == "companyLinkedinUrl":
+        a, b = _company_slug(old), _company_slug(new)
+        if a and b:
+            return a == b                      # same company slug -> same
+    elif key in ("employeeSize", "seeAllEmployeeSize"):
+        a, b = _numbers(old), _numbers(new)
+        if a and b:
+            return a == b                      # same numbers -> ignore the word "employees"
+    elif key == "website":
+        a, b = _site_host(old), _site_host(new)
+        if a and b:
+            return a == b                      # same domain -> ignore https / www
+    elif key == "prospectTenure":
+        a, b = _tenure_core(old), _tenure_core(new)
+        if a and b:
+            # new tenure is built as title, company, type, start, end, location.
+            # If one is the start of the other, only the duration or the trailing location differs.
+            return a == b or a.startswith(b) or b.startswith(a)
+
+    return norm(old) == norm(new)
+
 def blank(v) -> bool:
     return v is None or str(v).strip() in ("", "-")
 
@@ -1009,7 +1057,7 @@ def build_update_note(doc: dict, changes: dict, reason: str = "") -> str:
         old = old_value(doc, key)
         if key == "status" and blank(old):
             old = STATUS_QUALIFIED  # schema default
-        if norm(old) == norm(new):
+        if same_value(key, old, new):
             continue
         if key in SHOW_OLD_NEW:
             parts.append(f"{label}: {old if not blank(old) else '-'} -> {new}")
@@ -1138,7 +1186,9 @@ def update_one(driver, doc):
     # No "Present" role (or no dates at all) -> prospect has left -> DisQualified
     if no_present:
         changes["status"] = STATUS_DISQUALIFIED
-
+    for key in ("companyLinkedinUrl", "employeeSize", "seeAllEmployeeSize", "website", "prospectTenure"):
+        if key in changes and same_value(key, old_value(doc, key), changes[key]):
+            changes.pop(key)
     # note1: "Update Profile - <what was updated>"
     note = build_update_note(doc, changes, reason)
     old_note = doc.get("note1")
