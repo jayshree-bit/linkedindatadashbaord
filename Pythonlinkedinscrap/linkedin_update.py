@@ -46,7 +46,17 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
-
+from social_links import (
+    find_prospect_socials,
+    find_company_socials,
+    socials_from_website,
+    instagram_followers,
+    instagram_url_from_socials,
+    scrape_instagram_followers,
+    scrape_instagram_follower_list,  # NEW
+    _count_to_int,
+    SERPER_API_KEY,
+)
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 router = APIRouter(prefix="/api/prospects", tags=["linkedin-update"])
@@ -250,15 +260,62 @@ def pick(doc: dict, keys: List[str]):
     return None
 
 
+COUNTRIES = """Afghanistan, Albania, Algeria, Andorra, Angola, Antigua and Barbuda, Argentina, Armenia,
+Australia, Austria, Azerbaijan, Bahamas, Bahrain, Bangladesh, Barbados, Belarus, Belgium, Belize, Benin,
+Bhutan, Bolivia, Bosnia and Herzegovina, Botswana, Brazil, Brunei, Bulgaria, Burkina Faso, Burundi,
+Cabo Verde, Cambodia, Cameroon, Canada, Central African Republic, Chad, Chile, China, Colombia, Comoros,
+Congo, Costa Rica, Croatia, Cuba, Cyprus, Czechia, Denmark, Djibouti, Dominica, Dominican Republic,
+Ecuador, Egypt, El Salvador, Equatorial Guinea, Eritrea, Estonia, Eswatini, Ethiopia, Fiji, Finland,
+France, Gabon, Gambia, Georgia, Germany, Ghana, Greece, Grenada, Guatemala, Guinea, Guinea-Bissau,
+Guyana, Haiti, Honduras, Hungary, Iceland, India, Indonesia, Iran, Iraq, Ireland, Israel, Italy,
+Jamaica, Japan, Jordan, Kazakhstan, Kenya, Kiribati, Kosovo, Kuwait, Kyrgyzstan, Laos, Latvia, Lebanon,
+Lesotho, Liberia, Libya, Liechtenstein, Lithuania, Luxembourg, Madagascar, Malawi, Malaysia, Maldives,
+Mali, Malta, Marshall Islands, Mauritania, Mauritius, Mexico, Micronesia, Moldova, Monaco, Mongolia,
+Montenegro, Morocco, Mozambique, Myanmar, Namibia, Nauru, Nepal, Netherlands, New Zealand, Nicaragua,
+Niger, Nigeria, North Korea, North Macedonia, Norway, Oman, Pakistan, Palau, Palestine, Panama,
+Papua New Guinea, Paraguay, Peru, Philippines, Poland, Portugal, Qatar, Romania, Russia, Rwanda,
+Saint Kitts and Nevis, Saint Lucia, Saint Vincent and the Grenadines, Samoa, San Marino,
+Sao Tome and Principe, Saudi Arabia, Senegal, Serbia, Seychelles, Sierra Leone, Singapore, Slovakia,
+Slovenia, Solomon Islands, Somalia, South Africa, South Korea, South Sudan, Spain, Sri Lanka, Sudan,
+Suriname, Sweden, Switzerland, Syria, Taiwan, Tajikistan, Tanzania, Thailand, Timor-Leste, Togo, Tonga,
+Trinidad and Tobago, Tunisia, Turkey, Turkmenistan, Tuvalu, Uganda, Ukraine, United Arab Emirates,
+United Kingdom, United States, Uruguay, Uzbekistan, Vanuatu, Vatican City, Venezuela, Vietnam, Yemen,
+Zambia, Zimbabwe, Hong Kong, Macau, Puerto Rico"""
+COUNTRY_ALIASES = [
+    "USA", "US", "U.S.", "U.S.A.", "UK", "U.K.", "UAE", "England", "Scotland", "Wales",
+    "Northern Ireland", "Great Britain", "Korea", "Republic of Korea", "Czech Republic",
+    "Türkiye", "Turkiye", "Ivory Coast", "Côte d'Ivoire", "Democratic Republic of the Congo",
+    "DR Congo", "Burma", "Russian Federation", "Viet Nam", "The Netherlands", "Holland",
+    "People's Republic of China", "Republic of Ireland", "Bharat",
+]
+COUNTRY_KEYS = {norm(c) for c in COUNTRIES.split(",")} | {norm(a) for a in COUNTRY_ALIASES}
+
+
+def is_country(text) -> bool:
+    return norm(text) in COUNTRY_KEYS
+
+
 def parse_hq(text):
+    """'Rajouri Garden, New Delhi'          -> {'city': 'Rajouri Garden'}   (no country, none is set)
+       'Rajouri Garden, New Delhi, India'   -> city, state, country
+       'Pune, India'                        -> city, country
+    A part is only used as the country if it is on the country list."""
     parts = [p.strip() for p in (text or "").split(",") if p.strip()]
-    if len(parts) >= 3:
-        return {"city": parts[0], "state": parts[1], "country": parts[-1]}
-    if len(parts) == 2:
-        return {"city": parts[0], "country": parts[1]}
-    if len(parts) == 1:
-        return {"country": parts[0]}
-    return {}
+    if not parts:
+        return {}
+
+    idx = max((i for i, p in enumerate(parts) if is_country(p)), default=None)
+    if idx is None:
+        # no country in the text: never guess one, only keep the first part as the city
+        return {"city": parts[0]} if len(parts) >= 2 else {}
+
+    out = {"country": parts[idx]}
+    rest = parts[:idx]
+    if rest:
+        out["city"] = rest[0]
+    if len(rest) >= 2:
+        out["state"] = rest[1]
+    return out
 
 def normalize_website(url) -> str:
     """Any website value -> https://www.<domain>.<tld>
@@ -1010,6 +1067,29 @@ def known_company_details(name: str) -> dict:
         return {f: v for f, v in found.items() if v}
     return {}
 
+def known_company_socials(name: str, exclude_id=None) -> str:
+    """Company social links already saved on another prospect of the same company."""
+    if blank(name):
+        return ""
+    rx = re.compile(f"^{re.escape(name.strip())}$", re.I)
+    q = {"companyName": rx, "companySocials": {"$nin": ["", "-", None]}}
+    if exclude_id:
+        q["_id"] = {"$ne": exclude_id}
+    rec = prospects.find_one(q, sort=[("updatedAt", -1)])
+    return (rec.get("companySocials") or "").strip() if rec else ""
+
+
+def known_instagram(ig_url: str, exclude_id=None):
+    """Instagram counts already scraped for this same Instagram page."""
+    if blank(ig_url):
+        return None
+    q = {
+        "companyInstagramUrl": ig_url,
+        "companyInstagramFollowers": {"$nin": [None, "", "-"]},
+    }
+    if exclude_id:
+        q["_id"] = {"$ne": exclude_id}
+    return prospects.find_one(q, sort=[("updatedAt", -1)])
 
 def company_fields_for(name: str, scraped: dict, known: dict) -> dict:
     merged = {**scraped, **known}  # stored data wins over scraped
@@ -1038,6 +1118,28 @@ def build_prospect_tenure(exp):
     ]
     return " · ".join(str(p).strip() for p in parts if p and str(p).strip())
 
+# When the country is updated, only these address fields are updated with it.
+ADDRESS_ON_COUNTRY_CHANGE = ("address1", "state", "city", "zipcode")
+ADDRESS_SKIP_ON_COUNTRY_CHANGE = ("address2")
+
+
+def apply_country_rule(doc: dict, changes: dict) -> None:
+    """If the country is being updated, keep only address1, state, city
+    (and country). address2 / zipcode are dropped, and blank values
+    ("-") are never written for the three allowed fields."""
+    new_country = changes.get("country")
+    if blank(new_country):
+        return  # no country in this update -> nothing to do
+
+    if same_value("country", old_value(doc, "country"), new_country):
+        return  # country not changed -> normal behaviour
+
+    for k in ADDRESS_SKIP_ON_COUNTRY_CHANGE:
+        changes.pop(k, None)
+
+    for k in ADDRESS_ON_COUNTRY_CHANGE:
+        if blank(changes.get(k)):
+            changes.pop(k, None)
 # ---- after TRACKED_LABELS / SHOW_OLD_NEW ----
 
 # Extra key names an old value may be stored under (add real names from the debug output)
@@ -1156,9 +1258,8 @@ def update_one(driver, doc):
             f"{NOTE2_TEXT}: {exp['work_mode']}"
         )
 
-    open_to_work = ("Available" if exp.get("open_to_work") else "Not Available")
+    open_to_work = "Available" if exp.get("open_to_work") else "Not Available"
     note2_parts.append(f"Open to work: {open_to_work}")
-    changes["note2"] = " | ".join(note2_parts)
     # Company details: open the company page only when stored data has gaps
     known = known_company_details(exp["company"])
     needs_scrape = any(
@@ -1177,8 +1278,114 @@ def update_one(driver, doc):
     if not company_changed:
         # same company: never overwrite stored values with "-"
         fields = {k: v for k, v in fields.items() if v != "-"}
-    changes.update(fields)
+        changes.update(fields)
+        # ---- company social links: company website first, Serper fills the gaps ----
+    old_co_social = (doc.get("companySocials") or "").strip()
+    co_social_text = ""
 
+    if old_co_social and not company_changed:
+        co_social_text = old_co_social                      # already on this record
+    else:
+        co_social_text = known_company_socials(exp["company"], doc["_id"])   # reuse from another prospect
+        if co_social_text:
+            changes["companySocials"] = co_social_text
+            print("[DEBUG] company socials reused, no new lookup")
+        else:
+            co_website = fields.get("website")
+            if blank(co_website):
+                co_website = doc.get("website")
+            co_domain = fields.get("companyDomain")
+            if blank(co_domain):
+                co_domain = doc.get("companyDomain")
+            co_linkedin = fields.get("companyLinkedinUrl")
+            if blank(co_linkedin):
+                co_linkedin = doc.get("companyLinkedinUrl")
+            try:
+                co_socials = find_company_socials(
+                    exp["company"], co_website or "", co_domain or "", co_linkedin or ""
+                )
+            except Exception as e:
+                print("[DEBUG] company social lookup failed:", e)
+                co_socials = []
+            print("[DEBUG] company socials:", co_socials)
+            co_social_text = " | ".join(co_socials)
+            if co_social_text:
+                changes["companySocials"] = co_social_text
+
+    # ---- company Instagram followers (from the company's Instagram link) ----
+    ig_url = instagram_url_from_socials(co_social_text)
+
+    # same Instagram page already scraped for another prospect -> reuse it, no new request
+    ig_known = None
+    if ig_url and os.getenv("INSTAGRAM_REFRESH", "0") != "1":
+        ig_known = known_instagram(ig_url, doc["_id"])
+    # ---- Instagram individual follower list ----
+
+
+# ---- Instagram individual follower list ----
+
+
+# ---- Instagram individual follower list ----
+
+
+# ---- Instagram individual follower list ----
+
+    if ig_url and os.getenv(
+            "INSTAGRAM_SCRAPE_FOLLOWER_LIST", "0"
+        ) == "1":
+
+            try:
+                follower_list = scrape_instagram_follower_list(
+                    driver,
+                    ig_url,
+                    max_records=int(
+                        os.getenv("INSTAGRAM_FOLLOWER_MAX", "1000")
+                    )
+                )
+
+                print(
+                    "[SUCCESS] Instagram follower profiles:",
+                    len(follower_list)
+                )
+
+            except Exception as e:
+                print("[DEBUG] Instagram follower list failed:", e)
+                follower_list = []
+
+
+
+    if ig_known:
+        changes["companyInstagramUrl"] = ig_url
+        changes["companyInstagramFollowers"] = ig_known["companyInstagramFollowers"]
+        for k in ("companyInstagramFollowing", "companyInstagramPosts"):
+            if ig_known.get(k) is not None:
+                changes[k] = ig_known[k]
+        print("[DEBUG] instagram counts reused from another prospect")
+
+    elif ig_url and (
+        company_changed
+        or blank(doc.get("companyInstagramFollowers"))
+        or os.getenv("INSTAGRAM_REFRESH", "0") == "1"
+    ):
+        ig = None
+        try:
+            ig = scrape_instagram_followers(driver, ig_url)       # 1) logged-in Chrome
+        except Exception as e:
+            print("[DEBUG] instagram scrape error:", e)
+        if not ig:
+            try:
+                ig = instagram_followers(ig_url)                  # 2) API / meta / Serper fallback
+            except Exception as e:
+                print("[DEBUG] instagram fallback failed:", e)
+        print("[DEBUG] instagram followers:", ig)
+        if ig:
+            changes["companyInstagramUrl"] = ig_url
+            changes["companyInstagramFollowers"] = ig["followers"]
+            if ig.get("following") is not None:
+                changes["companyInstagramFollowing"] = ig["following"]
+            if ig.get("posts") is not None:
+                changes["companyInstagramPosts"] = ig["posts"]
+        time.sleep(random.uniform(3, 6))
     loc = parse_hq(exp.get("location"))
     if len(loc) == 3:                      # only trust "City, State, Country"
         changes.update(loc)
@@ -1186,6 +1393,8 @@ def update_one(driver, doc):
     # No "Present" role (or no dates at all) -> prospect has left -> DisQualified
     if no_present:
         changes["status"] = STATUS_DISQUALIFIED
+    apply_country_rule(doc, changes)
+    
     for key in ("companyLinkedinUrl", "employeeSize", "seeAllEmployeeSize", "website", "prospectTenure"):
         if key in changes and same_value(key, old_value(doc, key), changes[key]):
             changes.pop(key)
