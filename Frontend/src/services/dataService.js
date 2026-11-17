@@ -149,6 +149,11 @@ export const getCompanyImportStatusApi = (jobId) =>
     .get(`/private/data/company/import-excel/${encodeURIComponent(jobId)}`)
     .then((response) => response.data);
 
+export const downloadCompanyImportTemplateApi = () =>
+  api
+    .get('/private/data/company/import-template', { responseType: 'blob' })
+    .then((response) => response.data);
+
 
 export const uploadCompanyListApi = async (file) => {
   const form = new FormData();

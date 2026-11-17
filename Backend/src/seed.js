@@ -24,8 +24,8 @@ export const seed = async () => {
   }
   if (!(await Prospect.countDocuments())) {
     await Prospect.insertMany([
-      { name: 'Asha Patil', email: 'asha@acme.com', phone: '9890000001', company: 'Acme', status: 'New' },
-      { name: 'Rohan Shah', email: 'rohan@globex.com', phone: '9890000002', company: 'Globex', status: 'Contacted' },
+      { employeeName: 'Asha Patil', emailAddress: 'asha@acme.com', phoneNumber: '9890000001', companyName: 'Acme' },
+      { employeeName: 'Rohan Shah', emailAddress: 'rohan@globex.com', phoneNumber: '9890000002', companyName: 'Globex' },
     ]);
     await Company.insertMany([
       { name: 'Acme', industry: 'Manufacturing', website: 'acme.com', location: 'Pune' },

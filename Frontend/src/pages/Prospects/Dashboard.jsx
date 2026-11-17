@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchDashboardStats } from '../../features/dataSlice';
 import { useNavigate } from 'react-router-dom';
@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 export default function DashboardProspects() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const [userSearch, setUserSearch] = useState('');
 
   const {
     global = {},
@@ -33,6 +34,12 @@ export default function DashboardProspects() {
     selectedUser?.name ||
     selectedUser?.email ||
     'Selected user';
+  const searchTerm = userSearch.trim().toLowerCase();
+  const filteredUsers = users.filter((user) =>
+    [user.name, user.email]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(searchTerm))
+  );
 
   // Opens the prospect grid filtered by status and (if one is selected) the employee.
   const openProspects = (status = '') => {
@@ -234,8 +241,19 @@ export default function DashboardProspects() {
             </span>
           </button>
 
-          <div className="space-y-2">
-            {users.map((user) => {
+          <label className="mb-3 block">
+            <span className="sr-only">Search users by name or email</span>
+            <input
+              type="search"
+              value={userSearch}
+              onChange={(event) => setUserSearch(event.target.value)}
+              placeholder="Search users..."
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:focus:ring-blue-900"
+            />
+          </label>
+
+          <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+            {filteredUsers.map((user) => {
               const id = String(user._id ?? user.id ?? '');
               const name = user.name || user.email || 'Unnamed user';
               const isSelected = selectedUserId === id;
@@ -285,9 +303,9 @@ export default function DashboardProspects() {
               );
             })}
 
-            {!loading && users.length === 0 && (
+            {!loading && filteredUsers.length === 0 && (
               <p className="rounded-lg bg-gray-50 px-3 py-5 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400">
-                No users found.
+                {searchTerm ? 'No matching users.' : 'No users found.'}
               </p>
             )}
           </div>

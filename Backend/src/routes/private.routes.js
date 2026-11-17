@@ -4,7 +4,11 @@ import * as users from "../controllers/user.controller.js";
 import * as data from "../controllers/data.controller.js";
 import multer from 'multer';
 import { importProspectsExcel, getImportStatus, getDashboard } from '../controllers/data.controller.js';
-import { importCompaniesExcel, getCompanyImportStatus } from '../controllers/companyImport.controller.js';
+import {
+  downloadCompanyImportTemplate,
+  importCompaniesExcel,
+  getCompanyImportStatus,
+} from '../controllers/companyImport.controller.js';
 import { getUserActivities } from "../controllers/userActivity.controller.js";
 import { userActivityLogger } from "../middleware/userActivityLogger.js";
 
@@ -62,7 +66,7 @@ r.post("/:resource/update-linkedin",authorize("prospect", "view"), data.updateLi
 r.get("/update-linkedin/:jobId", authorize("prospect", "view"),data.linkedinUpdateStatus);
 const excelUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 },
+  limits: { fileSize: 100 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (!/\.xlsx$/i.test(file.originalname)) {
       return cb(new Error("Upload an .xlsx file."));
@@ -91,6 +95,12 @@ r.post(
   authorize('company', 'edit'),
   excelUpload.single('file'),
   importCompaniesExcel
+);
+
+r.get(
+  '/data/company/import-template',
+  authorize('company', 'edit'),
+  downloadCompanyImportTemplate
 );
 
 r.get(

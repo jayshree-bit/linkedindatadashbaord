@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { importProspects, resetImport } from '../features/dataSlice';
 
-const MAX_SIZE = 25 * 1024 * 1024;
+const MAX_SIZE = 100 * 1024 * 1024;
 
 export default function ImportExcelModal({ onClose, onImported }) {
   const dispatch = useDispatch();
@@ -50,7 +50,7 @@ const TEMPLATE_URL = '/templates/Sample_Import_Template.xlsx';
     }
     if (f.size > MAX_SIZE) {
       setFile(null);
-      return setLocalError('File is larger than 25 MB.');
+      return setLocalError('File is larger than 50 MB.');
     }
     setFile(f);
   };
@@ -147,7 +147,7 @@ const TEMPLATE_URL = '/templates/Sample_Import_Template.xlsx';
 
           <label className="grid gap-1.5">
             <span className="text-xs font-medium text-slate-500">
-              Excel file (.xlsx, max 25 MB) *
+              Excel file (.xlsx, max 100 MB) *
             </span>
             <input
               ref={inputRef}

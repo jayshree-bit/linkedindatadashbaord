@@ -583,6 +583,15 @@ const STATUS_COLORS = {
 };
 
 const renderFor = (key) => {
+  if (key === "date") {
+    return ({ row }) => {
+      if (!row[key]) return null;
+      const date = new Date(row[key]);
+      return Number.isNaN(date.getTime())
+        ? row[key]
+        : date.toLocaleDateString("en-IN");
+    };
+  }
   if (key === "updatedAt" || key === "createdAt") {
     return ({ row }) => (row[key] ? new Date(row[key]).toLocaleString() : null);
   }

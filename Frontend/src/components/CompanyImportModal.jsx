@@ -1,8 +1,10 @@
 import { useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { importCompanies, resetImport } from '../features/dataSlice';
+import { downloadCompanyImportTemplateApi } from '../services/dataService';
 
 const nf = new Intl.NumberFormat('en-IN');
+const MAX_FILE_SIZE = 100 * 1024 * 1024;
 
 function ProgressBar({ label, percent, detail }) {
   const pct = Math.min(100, Math.max(0, percent || 0));
@@ -27,13 +29,15 @@ export default function CompanyImportModal({ open, onClose, onDone }) {
   const dispatch = useDispatch();
   const fileRef = useRef(null);
   const [file, setFile] = useState(null);
-const TEMPLATE_URL = '/templates/CompaniesSampleTemplete.xlsx';
+  const [localError, setLocalError] = useState('');
+  const [templateLoading, setTemplateLoading] = useState(false);
   const { user } = useSelector((state) => state.auth);
   const { loading, phase, progress, stage, percent, processed, total, result, error } =
     useSelector((state) => state.data.importState);
 
   const userId = user?._id || user?.id;
   const uploaderName = user?.name || user?.username || user?.email || 'You';
+  const displayedError = localError || error;
 
   if (!open) return null;
 
@@ -41,13 +45,68 @@ const TEMPLATE_URL = '/templates/CompaniesSampleTemplete.xlsx';
     if (loading) return; // do not close while importing
     dispatch(resetImport());
     setFile(null);
+    setLocalError('');
     if (fileRef.current) fileRef.current.value = '';
     if (result) onDone?.();
     onClose?.();
   };
 
+  const downloadTemplate = async () => {
+    setLocalError('');
+    setTemplateLoading(true);
+    try {
+      const blob = await downloadCompanyImportTemplateApi();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'Company_Import_Template.xlsx';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (downloadError) {
+      setLocalError(
+        downloadError?.response?.data?.message ||
+          downloadError?.message ||
+          'Could not download the company import template.',
+      );
+    } finally {
+      setTemplateLoading(false);
+    }
+  };
+
+  const selectFile = (event) => {
+    const selectedFile = event.target.files?.[0] || null;
+    dispatch(resetImport());
+    setLocalError('');
+
+    if (!selectedFile) {
+      setFile(null);
+      return;
+    }
+    if (!/\.xlsx$/i.test(selectedFile.name)) {
+      setFile(null);
+      setLocalError('Only .xlsx files are supported.');
+      return;
+    }
+    if (selectedFile.size > MAX_FILE_SIZE) {
+      setFile(null);
+      setLocalError('File is larger than 100 MB.');
+      return;
+    }
+    setFile(selectedFile);
+  };
+
   const start = () => {
-    if (!file || !userId) return;
+    if (!file) {
+      setLocalError('Choose an .xlsx file.');
+      return;
+    }
+    if (!userId) {
+      setLocalError('Could not identify the logged-in user. Please log in again.');
+      return;
+    }
+    setLocalError('');
     dispatch(importCompanies({ file, uploadedBy: userId }));
   };
 
@@ -61,7 +120,7 @@ const TEMPLATE_URL = '/templates/CompaniesSampleTemplete.xlsx';
           <div>
             <h2 className="text-lg font-bold text-slate-900 dark:text-white">Import companies</h2>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Upload an .xlsx file. Duplicates are checked by Company name or Country.
+              Upload an .xlsx file. Companies with the same name and country are skipped as duplicates.
             </p>
           </div>
           <button
@@ -73,17 +132,18 @@ const TEMPLATE_URL = '/templates/CompaniesSampleTemplete.xlsx';
             ×
           </button>
         </div>
-  <div className="flex items-center justify-between rounded-lg border border-dashed border-indigo-200 bg-indigo-50/50 px-3 py-2">
+        <div className="mt-4 flex items-center justify-between rounded-lg border border-dashed border-indigo-200 bg-indigo-50/50 px-3 py-2">
             <span className="text-xs text-slate-600">
-                Not sure about the format? Use our sample sheet.
+                Need a template? Download the latest company fields.
             </span>
-            <a
-                href={TEMPLATE_URL}
-                download="company_import_template.xlsx"
-                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+            <button
+                type="button"
+                onClick={downloadTemplate}
+                disabled={templateLoading || loading}
+                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline disabled:opacity-50"
             >
-                ⬇ Download template
-            </a>
+                {templateLoading ? 'Preparing…' : '⬇ Download template'}
+            </button>
             </div>
         <div className="mt-5 flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm dark:bg-slate-800">
           <span className="text-slate-500 dark:text-slate-400">Uploaded by</span>
@@ -92,15 +152,24 @@ const TEMPLATE_URL = '/templates/CompaniesSampleTemplete.xlsx';
 
         {!result && (
           <div className="mt-4">
+            <p className="mb-1.5 text-xs font-medium text-slate-500">
+              Excel file (.xlsx, max 100 MB)
+            </p>
             <input
               ref={fileRef}
               type="file"
               accept=".xlsx"
               disabled={loading}
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              onChange={selectFile}
               className="block w-full rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white dark:border-slate-600 dark:text-slate-300"
             />
           </div>
+        )}
+
+        {file && (
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            {file.name} · {(file.size / 1024).toFixed(0)} KB
+          </p>
         )}
 
         {uploading && <div className="mt-5"><ProgressBar label="Uploading file" percent={progress} /></div>}
@@ -119,9 +188,9 @@ const TEMPLATE_URL = '/templates/CompaniesSampleTemplete.xlsx';
           </div>
         )}
 
-        {error && (
+        {displayedError && (
           <p className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">
-            {error}
+            {displayedError}
           </p>
         )}
 

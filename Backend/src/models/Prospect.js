@@ -4,7 +4,7 @@ const prospectSchema = new mongoose.Schema(
   {
     employeeCode: { type: String, trim: true, default: "" },
     employeeName: { type: String, trim: true, default: "" },
-    date: { type: String, trim: true, default: "" },
+    date: { type: Date, default: null },
     campaign: { type: String, trim: true, default: "" },
 
     firstName: { type: String, trim: true, default: "" },
@@ -91,6 +91,7 @@ const prospectSchema = new mongoose.Schema(
     qaComment: { type: String, trim: true, default: "" },
     ebbStatus: { type: String, trim: true, default: "" },
     auditorName: { type: String, trim: true, default: "" },
+
     auditDate: { type: String, trim: true, default: "" },
     uploadedBy: {
       type: mongoose.Schema.Types.ObjectId,
@@ -102,7 +103,7 @@ const prospectSchema = new mongoose.Schema(
 
     importBatchId: { type: String, trim: true, default: "", index: true },
   },
-  { timestamps: true },
+  { timestamps: true, collection: "Prospect_Database" },
 );
 prospectSchema.index({ createdAt: -1, _id: -1 });
 prospectSchema.index({ uploadedBy: 1, status: 1 });

@@ -47,15 +47,12 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 from social_links import (
-    find_prospect_socials,
     find_company_socials,
-    socials_from_website,
     instagram_followers,
     instagram_url_from_socials,
     scrape_instagram_followers,
-    scrape_instagram_follower_list,  # NEW
+    scrape_instagram_follower_list,
     _count_to_int,
-    SERPER_API_KEY,
 )
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
@@ -174,7 +171,7 @@ TRACKED_LABELS = {
     "naicsCode": "NAICS code",
 
 }
-SHOW_OLD_NEW = {"specificTitle", "companyName", "status", "city", "state", "country", "note2"}  # show "old -> new" for these
+SHOW_OLD_NEW = {"specificTitle", "companyName", "status", "city", "state", "country" }  # show "old -> new" for these
 
 FOOTER_MARKERS = ("Community Guidelines", "Ad Choices", "Privacy & Terms")
 
@@ -1119,20 +1116,27 @@ def build_prospect_tenure(exp):
     return " · ".join(str(p).strip() for p in parts if p and str(p).strip())
 
 # When the country is updated, only these address fields are updated with it.
+# Address fields are written ONLY when the country changes.
+# When it does: country, address1, state, city, zipcode are updated (address2 is not).
 ADDRESS_ON_COUNTRY_CHANGE = ("address1", "state", "city", "zipcode")
-ADDRESS_SKIP_ON_COUNTRY_CHANGE = ("address2")
+ADDRESS_SKIP_ON_COUNTRY_CHANGE = ("address2",)   # note the comma: it must be a tuple
 
 
 def apply_country_rule(doc: dict, changes: dict) -> None:
-    """If the country is being updated, keep only address1, state, city
-    (and country). address2 / zipcode are dropped, and blank values
-    ("-") are never written for the three allowed fields."""
+    """Country not updated  -> no address field is touched (city, state, address1,
+                               address2, zipcode and country are all removed).
+       Country updated      -> only country, address1, state, city, zipcode are kept;
+                               address2 is dropped and blank values are never written."""
     new_country = changes.get("country")
-    if blank(new_country):
-        return  # no country in this update -> nothing to do
+    country_changed = (
+        not blank(new_country)
+        and not same_value("country", old_value(doc, "country"), new_country)
+    )
 
-    if same_value("country", old_value(doc, "country"), new_country):
-        return  # country not changed -> normal behaviour
+    if not country_changed:
+        for k in ("country", *ADDRESS_ON_COUNTRY_CHANGE, *ADDRESS_SKIP_ON_COUNTRY_CHANGE):
+            changes.pop(k, None)
+        return
 
     for k in ADDRESS_SKIP_ON_COUNTRY_CHANGE:
         changes.pop(k, None)
@@ -1260,6 +1264,12 @@ def update_one(driver, doc):
 
     open_to_work = "Available" if exp.get("open_to_work") else "Not Available"
     note2_parts.append(f"Open to work: {open_to_work}")
+    note2_text = " | ".join(note2_parts)
+    old_note2 = doc.get("note2")
+    if blank(old_note2):
+        changes["note2"] = note2_text
+    elif note2_text not in old_note2:          # don't repeat the same text on every run
+        changes["note2"] = f"{old_note2} | {note2_text}"
     # Company details: open the company page only when stored data has gaps
     known = known_company_details(exp["company"])
     needs_scrape = any(
@@ -1291,23 +1301,26 @@ def update_one(driver, doc):
             changes["companySocials"] = co_social_text
             print("[DEBUG] company socials reused, no new lookup")
         else:
+            # Website / domain only. No Serper search.
             co_website = fields.get("website")
             if blank(co_website):
                 co_website = doc.get("website")
             co_domain = fields.get("companyDomain")
             if blank(co_domain):
                 co_domain = doc.get("companyDomain")
-            co_linkedin = fields.get("companyLinkedinUrl")
-            if blank(co_linkedin):
-                co_linkedin = doc.get("companyLinkedinUrl")
-            try:
-                co_socials = find_company_socials(
-                    exp["company"], co_website or "", co_domain or "", co_linkedin or ""
-                )
-            except Exception as e:
-                print("[DEBUG] company social lookup failed:", e)
-                co_socials = []
-            print("[DEBUG] company socials:", co_socials)
+
+            # build a site URL from the domain when there is no website
+            if blank(co_website) and not blank(co_domain):
+                co_website = normalize_website(co_domain)
+
+            co_socials = []
+            if not blank(co_website):
+                try:
+                    co_socials = find_company_socials(co_website, driver=driver) or []
+                except Exception as e:
+                    print("[DEBUG] company website social lookup failed:", e)
+            else:
+                print("[DEBUG] no website/domain, company socials skipped")
             co_social_text = " | ".join(co_socials)
             if co_social_text:
                 changes["companySocials"] = co_social_text
