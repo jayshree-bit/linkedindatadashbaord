@@ -229,7 +229,7 @@ dispatch(profileUpdated(result.user));
 
   return (
     <>
-      <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 text-slate-900 backdrop-blur-xl transition-colors duration-300 dark:border-slate-700 dark:bg-slate-900/90 dark:text-slate-100">
+      <header className="app-topbar sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 text-slate-900 backdrop-blur-xl transition-colors duration-300 dark:border-slate-700 dark:bg-slate-900/90 dark:text-slate-100">
         <div className="flex h-20 items-center justify-between gap-3 px-4 sm:gap-4 sm:px-6 lg:px-8">
           {/* Workspace title and mobile navigation */}
           <div className="flex min-w-0 items-center gap-3">

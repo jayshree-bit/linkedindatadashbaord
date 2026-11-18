@@ -80,7 +80,7 @@ export default function Sidebar({ user, isOpen, onClose, mini, onToggleMini }) {
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex flex-col
+        className={`app-sidebar fixed inset-y-0 left-0 z-50 flex flex-col
           border-r border-slate-200 bg-white text-slate-700
           transition-all duration-300
           dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200

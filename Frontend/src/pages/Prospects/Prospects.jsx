@@ -64,6 +64,7 @@ const cardConfig = {
     [r.specificTitle, r.companyName].filter(Boolean).join(' · '),
 
   badgeKey: 'status',
+  socialLabel: 'Company Social Links',
   socialKeys: [
     'linkedinUrl',
     'facebookUrl',
@@ -86,6 +87,7 @@ const cardConfig = {
       key: 'note2',
       label: 'Work Mode',
     },
+   
   ],
 };
 export default function Prospects() {

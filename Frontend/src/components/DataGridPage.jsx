@@ -807,7 +807,7 @@ const SOCIAL_ICONS = {
 };
 
 /* Social icons: only the ones that have a value are drawn, each links to its URL. */
-function SocialLinks({ row, keys }) {
+function SocialLinks({ row, keys, label }) {
   const parsedLinks = {};
   const socialKeys = {
     linkedin: "linkedinUrl",
@@ -835,10 +835,12 @@ function SocialLinks({ row, keys }) {
   if (!links.length) return null;
   return (
     <div className="dgp-social">
+      {label && <span className="dgp-social-label">{label}</span>}
       {links.map((k) => {
         const icon = SOCIAL_ICONS[k];
         const href = urlFor(k);
         return (
+         
           <a
             key={k}
             href={toHref(String(href).trim())}
@@ -940,7 +942,7 @@ function RecordCard({
         <div className="dgp-ci-id">
           <h3 title={title}>{title}</h3>
          
-            <SocialLinks row={row} keys={cfg.socialKeys} />
+           
         </div>
         {badge && (
           <span className={`dgp-pill dgp-pill-${pillColor(badge)}`}>
@@ -964,6 +966,7 @@ function RecordCard({
           const value = row[key];
 
           return (
+            <>
             <div key={baseKey} className="dgp-ci-row">
               <dt>{label}</dt>
               <dd>
@@ -975,10 +978,18 @@ function RecordCard({
                   String(value)
                 )}
               </dd>
+             
             </div>
+             
+            </>
           );
         })}
-             
+        
+            <SocialLinks
+              row={row}
+              keys={cfg.socialKeys}
+              label={cfg.socialLabel}
+            />
 
       </dl>
 
@@ -2300,7 +2311,7 @@ export default function DataGridPage({
               style={{
                 width: `${linkedinJob.total ? ((linkedinJob.processed ?? 0) / linkedinJob.total) * 100 : 0}%`,
                 height: "100%",
-                background: "#4f46e5",
+                background: "#0f9f92",
                 transition: "width .3s",
               }}
             />

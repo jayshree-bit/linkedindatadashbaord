@@ -139,6 +139,10 @@ const updatedRangeCondition = (model) => {
 
 const dateRangeCondition = (field, model) => {
   const range = parseRange({ from: model?.from, to: model?.to });
+  if (field === "createdAt") {
+    return Object.keys(range).length ? dateMatch(range) : null;
+  }
+
   const stringRange = {};
   if (model?.from) stringRange.$gte = model.from;
   if (model?.to) {

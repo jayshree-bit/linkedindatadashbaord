@@ -1,19 +1,80 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
 :root {
-  --ink: #1b2430;
-  --muted: #6b7686;
-  --line: #dde2ea;
-  --bg: #f5f6f8;
-  --brand: #1f5eff;
+  color-scheme: light;
+  --ink: #17243b;
+  --muted: #68778f;
+  --line: #e4e9f2;
+  --bg: #f5f7fc;
+  --brand: #0f9f92;
   --danger: #c62828;
+  --app-canvas: #f5f7fc;
+  --app-card-shadow: 0 2px 8px rgb(23 36 59 / 5%), 0 14px 34px rgb(23 36 59 / 3%);
+  --color-indigo-50: #f0fdfa;
+  --color-indigo-100: #ccfbf1;
+  --color-indigo-200: #99f6e4;
+  --color-indigo-300: #5eead4;
+  --color-indigo-400: #2dd4bf;
+  --color-indigo-500: #14b8a6;
+  --color-indigo-600: #0f9f92;
+  --color-indigo-700: #0f766e;
+  --color-indigo-800: #115e59;
+  --color-indigo-900: #134e4a;
+  --color-indigo-950: #042f2e;
+  --color-violet-50: #f0f9ff;
+  --color-violet-100: #e0f2fe;
+  --color-violet-200: #bae6fd;
+  --color-violet-300: #7dd3fc;
+  --color-violet-400: #38bdf8;
+  --color-violet-500: #0ea5e9;
+  --color-violet-600: #0284c7;
+  --color-violet-700: #0369a1;
+  --color-violet-800: #075985;
+  --color-violet-900: #0c4a6e;
+  --color-violet-950: #082f49;
+  --color-purple-50: #fffbeb;
+  --color-purple-100: #fef3c7;
+  --color-purple-200: #fde68a;
+  --color-purple-300: #fcd34d;
+  --color-purple-400: #fbbf24;
+  --color-purple-500: #f59e0b;
+  --color-purple-600: #d97706;
+  --color-purple-700: #b45309;
+  --color-purple-800: #92400e;
+  --color-purple-900: #78350f;
+  --color-purple-950: #451a03;
+}
+
+html.dark {
+  color-scheme: dark;
+  --ink: #e7edf7;
+  --muted: #9aa9be;
+  --line: #29374d;
+  --bg: #0b1322;
+  --brand: #2dd4bf;
+  --app-canvas: #0b1322;
+  --app-card-shadow: 0 2px 12px rgb(0 0 0 / 16%);
 }
 
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  min-width: 320px;
+  min-height: 100vh;
+  font-family: "Manrope", "Segoe UI", sans-serif;
   color: var(--ink);
   background: var(--bg);
+  font-feature-settings: "ss01" on;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  color: #134e4a;
+  background: #99f6e4;
+}
+
+:focus-visible {
+  outline-color: #0f9f92;
 }
 
 @layer components {
@@ -139,8 +200,8 @@ body {
 }
 
 .grid-toolbar input[type="search"]:focus {
-  border-color: #6366f1;
-  box-shadow: 0 0 0 2px #6366f122;
+  border-color: #0f9f92;
+  box-shadow: 0 0 0 2px #0f9f9222;
 }
 
 .column-menu-container {
@@ -251,6 +312,62 @@ body {
 .muted {
   color: #64748b;
   font-size: 13px;
+}
+
+.app-shell {
+  background-color: var(--app-canvas);
+}
+
+.app-main {
+  background-color: var(--app-canvas);
+  background-image:
+    radial-gradient(ellipse at 12% 0%, rgb(20 184 166 / 7%), transparent 34rem),
+    radial-gradient(ellipse at 92% 18%, rgb(14 165 233 / 5%), transparent 30rem);
+}
+
+.app-topbar {
+  box-shadow: 0 1px 0 rgb(23 36 59 / 2%), 0 8px 26px rgb(23 36 59 / 3%);
+}
+
+.app-sidebar {
+  box-shadow: 10px 0 32px rgb(23 36 59 / 4%);
+}
+
+.app-sidebar .bg-indigo-50 {
+  background-image: linear-gradient(110deg, #ccfbf1, #e0f2fe);
+}
+
+.app-sidebar .bg-indigo-600 {
+  background-image: linear-gradient(140deg, #14b8a6, #0f9f92 58%, #0284c7);
+  box-shadow: 0 5px 14px rgb(15 159 146 / 25%);
+}
+
+.app-main .rounded-2xl.border {
+  box-shadow: var(--app-card-shadow);
+}
+
+.app-main button,
+.app-topbar button,
+.app-sidebar button {
+  transition-duration: 160ms;
+}
+
+html.dark .app-main {
+  background-image:
+    radial-gradient(ellipse at 12% 0%, rgb(20 184 166 / 11%), transparent 34rem),
+    radial-gradient(ellipse at 92% 18%, rgb(14 165 233 / 7%), transparent 30rem);
+}
+
+html.dark .app-topbar {
+  box-shadow: 0 1px 0 rgb(148 163 184 / 5%), 0 8px 26px rgb(0 0 0 / 12%);
+}
+
+html.dark .app-sidebar {
+  box-shadow: 10px 0 32px rgb(0 0 0 / 16%);
+}
+
+html.dark .app-sidebar .bg-indigo-50 {
+  background-image: linear-gradient(110deg, rgb(45 212 191 / 16%), rgb(56 189 248 / 10%));
 }
 
 @media (max-width: 640px) {

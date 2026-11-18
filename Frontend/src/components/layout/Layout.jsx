@@ -13,7 +13,7 @@ export default function Layout() {
   const [sidebarMini, setSidebarMini] = useState(false);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 transition-colors duration-300 dark:bg-slate-950 dark:text-slate-100">
+    <div className="app-shell min-h-screen bg-slate-50 text-slate-900 transition-colors duration-300 dark:bg-slate-950 dark:text-slate-100">
       <Sidebar
         user={user}
         isOpen={sidebarOpen}
@@ -32,7 +32,7 @@ export default function Layout() {
           onMenuClick={() => setSidebarOpen((open) => !open)}
         />
 
-        <main className="min-h-[calc(100vh-5rem)] bg-slate-50 p-4 transition-colors duration-300 dark:bg-slate-950 sm:p-5 lg:p-7">
+        <main className="app-main min-h-[calc(100vh-5rem)] bg-slate-50 p-4 transition-colors duration-300 dark:bg-slate-950 sm:p-5 lg:p-7">
           <div className="mx-auto w-full max-w-none">
             <Outlet />
           </div>

@@ -283,6 +283,7 @@ export default function RawDataPage({ resource }) {
           .join(' · '),
       badgeKey: statusKey || null,
       imageKey: findField('Profile Photo URL', 'Photo URL'),
+      socialLabel: isProspect ? 'Company Social Links' : null,
       socialKeys: socialColumns.map((social) => social.key),
       items: fieldItems.length
         ? fieldItems

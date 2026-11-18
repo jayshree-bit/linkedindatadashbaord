@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import {
@@ -18,6 +18,11 @@ import {
 } from "recharts";
 import { can } from "../features/authSlice";
 import { fetchDashboard } from "../features/dataSlice";
+import {
+  exportFileApi,
+  exportStartApi,
+  exportStatusApi,
+} from "../services/dataService";
 
 /* ---------- helpers ---------- */
 const pad = (n) => String(n).padStart(2, "0");
@@ -80,11 +85,11 @@ const buildTimeline = (from, to, prospects = [], companies = []) => {
 };
 
 const PALETTE = [
-  "#6366f1",
+  "#0f9f92",
   "#10b981",
   "#f59e0b",
-  "#8b5cf6",
-  "#ec4899",
+  "#0284c7",
+  "#f43f5e",
   "#06b6d4",
   "#ef4444",
   "#84cc16",
@@ -99,7 +104,7 @@ const tooltipStyle = {
     boxShadow: "0 10px 30px rgba(15,23,42,0.15)",
     fontSize: 12,
   },
-  cursor: { fill: "rgba(99,102,241,0.08)" },
+  cursor: { fill: "rgba(15,159,146,0.08)" },
 };
 
 const cardClass =
@@ -183,7 +188,7 @@ function HBar({
   data,
   dataKey = "count",
   labelKey = "label",
-  color = "#6366f1",
+  color = "#0f9f92",
   format = nf.format,
 }) {
   return (
@@ -282,6 +287,10 @@ export default function Dashboard() {
 
   const [from, setFrom] = useState(monthStart());
   const [to, setTo] = useState(today());
+  const [exportingResource, setExportingResource] = useState("");
+  const [exportProgress, setExportProgress] = useState("");
+  const [exportNotice, setExportNotice] = useState(null);
+  const exportRunRef = useRef(0);
 
   const invalidRange = Boolean(from && to && from > to);
 
@@ -292,8 +301,17 @@ export default function Dashboard() {
     return () => request.abort(); // ignore stale responses when dates change quickly
   }, [dispatch, from, to, invalidRange]);
 
+  useEffect(
+    () => () => {
+      exportRunRef.current += 1;
+    },
+    [],
+  );
+
   const totals = data?.totals;
   const charts = data?.charts;
+  const prospectsInRange = totals?.prospectsInRange ?? 0;
+  const companiesInRange = totals?.companiesInRange ?? 0;
 
   const timeline = useMemo(
     () =>
@@ -327,11 +345,92 @@ export default function Dashboard() {
     { label: "This month", from: monthStart(), to: today() },
   ];
 
+  const exportFilteredData = async (resource) => {
+    const exportFrom = from;
+    const exportTo = to;
+    const runId = ++exportRunRef.current;
+    setExportingResource(resource);
+    setExportProgress("Preparing export...");
+    setExportNotice(null);
+
+    try {
+      const { jobId } = await exportStartApi(resource, {
+        sortBy: "createdAt",
+        sortOrder: "desc",
+        filters: {
+          createdAt: {
+            op: "dateRange",
+            from: exportFrom,
+            to: exportTo,
+          },
+        },
+        columns: [],
+      });
+      if (runId !== exportRunRef.current) return;
+      if (!jobId) throw new Error("The export job could not be started.");
+
+      for (;;) {
+        const status = await exportStatusApi(resource, jobId);
+        if (runId !== exportRunRef.current) return;
+        if (status.state === "failed") {
+          throw new Error(status.error || "The export failed.");
+        }
+        if (status.state === "done") break;
+        if (status.state !== "running") {
+          throw new Error("The export returned an invalid status.");
+        }
+
+        setExportProgress(
+          status.processed
+            ? `Exporting ${status.processed.toLocaleString()} rows...`
+            : "Preparing export...",
+        );
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      }
+
+      setExportProgress("Downloading file...");
+      const blob = await exportFileApi(resource, jobId);
+      if (runId !== exportRunRef.current) return;
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${resource}-${exportFrom}-to-${exportTo}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+      setExportNotice({
+        type: "success",
+        message: `${resource === "prospect" ? "Prospect" : "Company"} export downloaded.`,
+      });
+    } catch (exportError) {
+      if (runId !== exportRunRef.current) return;
+      const apiMessage = exportError?.response?.data?.message;
+      setExportNotice({
+        type: "error",
+        message:
+          (typeof apiMessage === "string" && apiMessage) ||
+          exportError?.message ||
+          "The export failed. Please try again.",
+      });
+    } finally {
+      if (runId === exportRunRef.current) {
+        setExportingResource("");
+        setExportProgress("");
+      }
+    }
+  };
+
   const dateInput =
     "rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:ring-indigo-500/30";
 
   return (
-    <div className="space-y-8 text-slate-900 transition-colors duration-300 dark:text-slate-100">
+    <div
+      className="space-y-8 text-slate-900 transition-colors duration-300 dark:text-slate-100"
+      aria-busy={loading}
+    >
       {/* Welcome banner */}
       <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-indigo-700 via-indigo-600 to-violet-600 p-6 text-white shadow-xl shadow-indigo-200/50 dark:shadow-none sm:p-8">
         <div className="pointer-events-none absolute -right-12 -top-24 h-72 w-72 rounded-full border-[40px] border-white/10" />
@@ -371,7 +470,12 @@ export default function Dashboard() {
           </h2>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
             {loading
-              ? "Updating…"
+              ? (
+                <span className="inline-flex items-center gap-2" role="status">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-teal-600 border-t-transparent dark:border-teal-400 dark:border-t-transparent" />
+                  Updating dashboard data…
+                </span>
+              )
               : "Select a date range to refresh the dashboard"}
           </p>
         </div>
@@ -420,8 +524,60 @@ export default function Dashboard() {
               onChange={(e) => setTo(e.target.value)}
             />
           </label>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {can(user, "prospect", "view") && (
+              <button
+                type="button"
+                onClick={() => exportFilteredData("prospect")}
+                disabled={
+                  invalidRange ||
+                  loading ||
+                  Boolean(exportingResource) ||
+                  !prospectsInRange
+                }
+                title="Export every prospect matching the selected date range"
+                className="rounded-lg bg-teal-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {exportingResource === "prospect"
+                  ? exportProgress
+                  : `Export prospects (${nf.format(prospectsInRange)})`}
+              </button>
+            )}
+            {can(user, "company", "view") && (
+              <button
+                type="button"
+                onClick={() => exportFilteredData("company")}
+                disabled={
+                  invalidRange ||
+                  loading ||
+                  Boolean(exportingResource) ||
+                  !companiesInRange
+                }
+                title="Export every company matching the selected date range"
+                className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {exportingResource === "company"
+                  ? exportProgress
+                  : `Export companies (${nf.format(companiesInRange)})`}
+              </button>
+            )}
+          </div>
         </div>
       </section>
+
+      {exportNotice && (
+        <p
+          role={exportNotice.type === "error" ? "alert" : "status"}
+          className={`rounded-xl px-4 py-3 text-sm ${
+            exportNotice.type === "error"
+              ? "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300"
+              : "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+          }`}
+        >
+          {exportNotice.message}
+        </p>
+      )}
 
       {invalidRange && (
         <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
@@ -441,7 +597,7 @@ export default function Dashboard() {
           value={nf.format(totals?.prospectsInRange ?? 0)}
           sub={`${shortDate(from)} – ${shortDate(to)}`}
           icon="◎"
-          color="violet"
+          color="sky"
           loading={showSkeleton}
         />
         <Kpi
@@ -488,8 +644,8 @@ export default function Dashboard() {
             >
               <defs>
                 <linearGradient id="gProspects" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#6366f1" stopOpacity={0.45} />
-                  <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
+                  <stop offset="0%" stopColor="#0f9f92" stopOpacity={0.45} />
+                  <stop offset="100%" stopColor="#0f9f92" stopOpacity={0} />
                 </linearGradient>
                 <linearGradient id="gCompanies" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#10b981" stopOpacity={0.4} />
@@ -519,7 +675,7 @@ export default function Dashboard() {
                 type="monotone"
                 dataKey="prospects"
                 name="Prospects"
-                stroke="#6366f1"
+                stroke="#0f9f92"
                 strokeWidth={2.5}
                 fill="url(#gProspects)"
                 dot={false}
