@@ -23,8 +23,7 @@ import socket
 import shutil
 import threading
 import subprocess
-
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List
 from urllib.parse import urlparse, urlunparse
@@ -356,6 +355,14 @@ def not_footer(t: str) -> bool:
 def _today() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def today_date() -> datetime:
+    """Today's date in IST, stored as midnight UTC.
+    Same shape as an Excel import date ("YYYY-MM-DD" is saved as midnight UTC),
+    so the Excel vs stored date check compares like with like."""
+    n = datetime.now(IST)
+    return datetime(n.year, n.month, n.day, tzinfo=timezone.utc)
 
 def views_today() -> int:
     d = view_log.find_one({"_id": _today()})
@@ -1202,6 +1209,7 @@ def build_diff(doc: dict, changes: dict) -> list:
 def mark_disqualified(doc, reason: str):
     changes = {
         "status": STATUS_DISQUALIFIED,
+        "date" :today_date(),
         "updatedAt": datetime.now(timezone.utc),
     }
     note = build_update_note(doc, changes, reason)
@@ -1251,6 +1259,7 @@ def update_one(driver, doc):
         "linkedinEmploymentEndDate": exp.get("employment_end", ""),
         "linkedinLocation": exp.get("location", ""),
         "linkedinAbout": exp.get("about", ""),
+        "date":today_date(),
         "updatedAt": datetime.now(timezone.utc),
     }
     if exp.get("photo_url"):                          # never overwrite with blank

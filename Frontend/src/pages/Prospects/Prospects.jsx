@@ -64,6 +64,15 @@ const cardConfig = {
     [r.specificTitle, r.companyName].filter(Boolean).join(' · '),
 
   badgeKey: 'status',
+  socialKeys: [
+    'linkedinUrl',
+    'facebookUrl',
+    'instagramUrl',
+    'twitterUrl',
+    'youtubeUrl',
+    'tiktokUrl',
+    'website',
+  ],
 
   items: [
     'emailAddress',
@@ -76,10 +85,6 @@ const cardConfig = {
     {
       key: 'note2',
       label: 'Work Mode',
-    },
-     {
-      key: 'companySocials',
-      label: 'Company Socials',
     },
   ],
 };

@@ -149,6 +149,103 @@ export const getCompanyImportStatusApi = (jobId) =>
     .get(`/private/data/company/import-excel/${encodeURIComponent(jobId)}`)
     .then((response) => response.data);
 
+export const importRawExcelApi = (resource, file, onProgress) => {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  return api
+    .post(`/private/data/${encodeURIComponent(resource)}/import-raw`, formData, {
+      timeout: 0,
+      onUploadProgress: (event) => {
+        if (onProgress && event.total) {
+          onProgress(Math.round((event.loaded * 100) / event.total));
+        }
+      },
+    })
+    .then((response) => response.data);
+};
+
+export const getRawImportStatusApi = (resource, jobId) =>
+  api
+    .get(
+      `/private/data/${encodeURIComponent(resource)}/import-raw/${encodeURIComponent(jobId)}`,
+    )
+    .then((response) => response.data);
+
+export const getRawImportsApi = (resource) =>
+  api
+    .get(`/private/data/${encodeURIComponent(resource)}/raw/imports`)
+    .then((response) => response.data);
+
+export const getRawRowsApi = (
+  resource,
+  {
+    importId,
+    page = 1,
+    limit = 25,
+    search = '',
+    sortBy = '',
+    sortOrder = 'asc',
+    filters = {},
+  } = {},
+) =>
+  api
+    .get(`/private/data/${encodeURIComponent(resource)}/raw`, {
+      params: {
+        importId,
+        page,
+        limit,
+        search,
+        sortBy,
+        sortOrder,
+        filters: Object.keys(filters).length ? JSON.stringify(filters) : '',
+      },
+    })
+    .then((response) => response.data);
+
+export const getRawDistinctApi = (
+  resource,
+  {
+    importId,
+    field,
+    search = '',
+    filters = {},
+    valueSearch = '',
+    limit = 200,
+  } = {},
+) =>
+  api
+    .get(
+      `/private/data/${encodeURIComponent(resource)}/raw/distinct/${encodeURIComponent(field)}`,
+      {
+        params: {
+          importId,
+          search,
+          valueSearch,
+          limit,
+          filters: Object.keys(filters).length ? JSON.stringify(filters) : '',
+        },
+      },
+    )
+    .then((response) => response.data);
+
+export const exportRawRowsApi = async (resource, params) => {
+  const { columns, filters, ...rest } = params;
+  const response = await api.get(
+    `/private/data/${encodeURIComponent(resource)}/raw/export`,
+    {
+      params: {
+        ...rest,
+        filters: JSON.stringify(filters ?? {}),
+        columns: JSON.stringify(columns ?? []),
+      },
+      responseType: 'blob',
+      timeout: 0,
+    },
+  );
+  return response.data;
+};
+
 export const downloadCompanyImportTemplateApi = () =>
   api
     .get('/private/data/company/import-template', { responseType: 'blob' })

@@ -9,6 +9,7 @@ import {
   importCompaniesExcel,
   getCompanyImportStatus,
 } from '../controllers/companyImport.controller.js';
+import * as rawImport from '../controllers/rawImport.controller.js';
 import { getUserActivities } from "../controllers/userActivity.controller.js";
 import { userActivityLogger } from "../middleware/userActivityLogger.js";
 
@@ -107,6 +108,38 @@ r.get(
   '/data/company/import-excel/:jobId',
   authorize('company', 'edit'),
   getCompanyImportStatus
+);
+
+r.post(
+  '/data/:resource/import-raw',
+  authorize(resource, 'edit'),
+  excelUpload.single('file'),
+  rawImport.startRawImport
+);
+r.get(
+  '/data/:resource/import-raw/:jobId',
+  authorize(resource, 'edit'),
+  rawImport.getRawImportStatus
+);
+r.get(
+  '/data/:resource/raw/imports',
+  authorize(resource, 'view'),
+  rawImport.getRawImports
+);
+r.get(
+  '/data/:resource/raw/export',
+  authorize(resource, 'view'),
+  rawImport.exportRawExcel
+);
+r.get(
+  '/data/:resource/raw/distinct/:field',
+  authorize(resource, 'view'),
+  rawImport.getRawDistinctValues
+);
+r.get(
+  '/data/:resource/raw',
+  authorize(resource, 'view'),
+  rawImport.getRawRows
 );
 
 r.get('/prospect/linkedin-logs', data.getLinkedinLogs);

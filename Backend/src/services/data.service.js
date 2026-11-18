@@ -137,6 +137,25 @@ const updatedRangeCondition = (model) => {
   return Object.keys(range).length ? { updatedAt: range } : null;
 };
 
+const dateRangeCondition = (field, model) => {
+  const range = parseRange({ from: model?.from, to: model?.to });
+  const stringRange = {};
+  if (model?.from) stringRange.$gte = model.from;
+  if (model?.to) {
+    const end = new Date(`${model.to}T00:00:00.000Z`);
+    end.setUTCDate(end.getUTCDate() + 1);
+    stringRange.$lt = end.toISOString().slice(0, 10);
+  }
+
+  const conditions = [];
+  if (Object.keys(range).length) conditions.push({ [field]: range });
+  if (Object.keys(stringRange).length) {
+    conditions.push({ [field]: stringRange });
+  }
+  if (conditions.length === 2) return { $or: conditions };
+  return conditions[0] ?? null;
+};
+
 const parseFilters = (resource, raw) => {
   if (!raw) return [];
 
@@ -181,8 +200,13 @@ const parseFilters = (resource, raw) => {
       typeof model === "string" ? { op: "contains", text: model } : model;
     if (!m || typeof m !== "object") continue;
 
-    const textCond = textCondition(m.op ?? "contains", m.text);
-    if (textCond) conditions.push({ [field]: textCond });
+    if (m.op === "dateRange") {
+      const dateCondition = dateRangeCondition(field, m);
+      if (dateCondition) conditions.push(dateCondition);
+    } else {
+      const textCond = textCondition(m.op ?? "contains", m.text);
+      if (textCond) conditions.push({ [field]: textCond });
+    }
 
     if (Array.isArray(m.values)) {
       const values = m.values.slice(0, 500);
@@ -414,20 +438,6 @@ const dateMatch = (range) => {
   };
 };
 const createdOrId = { $ifNull: ["$createdAt", { $toDate: "$_id" }] };
-const exactRevenueText = {
-  $toLower: {
-    $trim: {
-      input: {
-        $toString: {
-          $ifNull: [
-            { $getField: { field: "Exact Revenue", input: "$$ROOT" } },
-            { $ifNull: ["$exactRevenue", ""] },
-          ],
-        },
-      },
-    },
-  },
-};
 /* from / to are "YYYY-MM-DD"; both ends are inclusive. */
 const parseRange = ({ from, to }) => {
   const range = {};
@@ -465,24 +475,6 @@ const groupByText = (field, limit) => [
   { $limit: limit },
   { $project: { _id: 0, label: 1, count: 1 } },
 ];
-/* Group by employeeName (case-insensitive), with qualified / disqualified split. */
-const groupByEmployeeName = (limit) => [
-  { $match: { employeeName: { $nin: [null, ""] } } },
-  {
-    $group: {
-      _id: { $toLower: { $trim: { input: "$employeeName" } } },
-      label: { $first: "$employeeName" },
-      count: { $sum: 1 },
-      qualified: { $sum: { $cond: [{ $eq: ["$status", "Qualified"] }, 1, 0] } },
-      disqualified: {
-        $sum: { $cond: [{ $eq: ["$status", "DisQualified"] }, 1, 0] },
-      },
-    },
-  },
-  { $sort: { count: -1, _id: 1 } },
-  { $limit: limit },
-  { $project: { _id: 0, label: 1, count: 1, qualified: 1, disqualified: 1 } },
-];
 const dailyCounts = [
   {
     $group: {
@@ -495,81 +487,6 @@ const dailyCounts = [
   { $sort: { _id: 1 } },
   { $project: { _id: 0, date: "$_id", count: 1 } },
 ];
-
-/* exactRevenue is stored as a string, so turn "1,200,000" / "$1200000" into a number.
-   Values such as "10M-50M" or "1.2B" cannot be converted and are skipped here. */
-const revenueNumber = {
-  $let: {
-    vars: {
-      m: {
-        $regexFind: {
-          input: exactRevenueText,
-          regex:
-            "^\\$?\\s*([0-9][0-9,]*\\.?[0-9]*)\\s*(billion|bn|b|million|mn|m|thousand|k)?\\+?$",
-        },
-      },
-    },
-    in: {
-      $cond: [
-        { $eq: ["$$m", null] },
-        null,
-        {
-          $multiply: [
-            {
-              $convert: {
-                input: {
-                  $replaceAll: {
-                    input: { $arrayElemAt: ["$$m.captures", 0] },
-                    find: ",",
-                    replacement: "",
-                  },
-                },
-                to: "double",
-                onError: null,
-                onNull: null,
-              },
-            },
-            {
-              $let: {
-                vars: {
-                  unit: {
-                    $ifNull: [{ $arrayElemAt: ["$$m.captures", 1] }, ""],
-                  },
-                },
-                in: {
-                  $switch: {
-                    branches: [
-                      {
-                        case: { $in: ["$$unit", ["billion", "bn", "b"]] },
-                        then: 1e9,
-                      },
-                      {
-                        case: { $in: ["$$unit", ["million", "mn", "m"]] },
-                        then: 1e6,
-                      },
-                      {
-                        case: { $in: ["$$unit", ["thousand", "k"]] },
-                        then: 1e3,
-                      },
-                    ],
-                    default: 1,
-                  },
-                },
-              },
-            },
-          ],
-        },
-      ],
-    },
-  },
-};
-
-const companyLabel = {
-  $ifNull: [
-    { $getField: { field: "Company Name", input: "$$ROOT" } },
-    { $ifNull: ["$companyName", { $ifNull: ["$name", "$domain"] }] },
-  ],
-};
 
 export const getDashboard = async ({ from, to, limit = 10 } = {}) => {
   const top = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 10));
@@ -599,16 +516,29 @@ export const getDashboard = async ({ from, to, limit = 10 } = {}) => {
       { $match: rangeMatch },
       {
         $facet: {
-          count: [{ $count: "n" }],
+          count: [
+            {
+              $group: {
+                _id: null,
+                n: { $sum: 1 },
+                qualified: {
+                  $sum: { $cond: [{ $eq: ["$status", "Qualified"] }, 1, 0] },
+                },
+                disqualified: {
+                  $sum: { $cond: [{ $eq: ["$status", "DisQualified"] }, 1, 0] },
+                },
+              },
+            },
+          ],
           byCountry: groupByText("country", top),
           byCompany: groupByText("companyName", top),
           byEmployeeSize: groupByText("employeeSize", top),
-          byJobLevel: groupByText("jobLevel", top), // NEW
-          byEmployeeName: groupByEmployeeName(top), // NEW
+          byJobLevel: groupByText("jobLevel", top),
+          byJobRole: groupByText("jobRole", top),
           byEmployee: [
             {
               $group: {
-                _id: "$uploadedBy",
+                _id: { $ifNull: ["$uploadedBy", { $ifNull: ["$uploadedByName", null] }] },
                 count: { $sum: 1 },
                 qualified: {
                   $sum: { $cond: [{ $eq: ["$status", "Qualified"] }, 1, 0] },
@@ -616,7 +546,7 @@ export const getDashboard = async ({ from, to, limit = 10 } = {}) => {
                 disqualified: {
                   $sum: { $cond: [{ $eq: ["$status", "DisQualified"] }, 1, 0] },
                 },
-                employeeName: { $first: "$employeeName" },
+                uploadedByName: { $first: "$uploadedByName" },
               },
             },
             { $sort: { count: -1 } },
@@ -633,32 +563,15 @@ export const getDashboard = async ({ from, to, limit = 10 } = {}) => {
         $facet: {
           count: [{ $count: "n" }],
           overTime: dailyCounts,
-          revenue: [
-            { $addFields: { revenueValue: revenueNumber } },
-            { $match: { revenueValue: { $gt: 0 } } },
-            { $sort: { revenueValue: -1 } },
-            { $limit: top },
-            {
-              $project: {
-                _id: 0,
-                label: companyLabel,
-                revenue: "$revenueValue",
-                revenueRange: {
-                  $ifNull: [
-                    { $getField: { field: "Revenue", input: "$$ROOT" } },
-                    "$revenue",
-                  ],
-                },
-              },
-            },
-          ],
         },
       },
     ]),
   ]);
 
   /* Names for the "prospects by employee" chart. */
-  const ids = p.byEmployee.map((r) => r._id).filter(Boolean);
+  const ids = p.byEmployee
+    .map((r) => r._id)
+    .filter((id) => id instanceof mongoose.Types.ObjectId);
   const users = ids.length
     ? await User.find({ _id: { $in: ids } })
         .select("name email")
@@ -667,10 +580,16 @@ export const getDashboard = async ({ from, to, limit = 10 } = {}) => {
   const userById = new Map(users.map((u) => [String(u._id), u]));
 
   const byEmployee = p.byEmployee.map((r) => {
-    const u = r._id ? userById.get(String(r._id)) : null;
+    const userId =
+      r._id instanceof mongoose.Types.ObjectId ? r._id : null;
+    const u = userId ? userById.get(String(userId)) : null;
     return {
-      userId: r._id || null,
-      label: u?.name || u?.email || r.employeeName || "Unassigned",
+      userId,
+      label:
+        u?.name ||
+        u?.email ||
+        (typeof r._id === "string" ? r._id : r.uploadedByName) ||
+        "Unassigned",
       count: r.count,
       qualified: r.qualified,
       disqualified: r.disqualified,
@@ -689,17 +608,18 @@ export const getDashboard = async ({ from, to, limit = 10 } = {}) => {
       prospectsToday,
       companiesToday,
       weekStartsOn: weekStart.toISOString(),
+      qualifiedInRange: p.count[0]?.qualified || 0,
+      disqualifiedInRange: p.count[0]?.disqualified || 0,
     },
     charts: {
       prospectsByCountry: p.byCountry,
       prospectsByCompany: p.byCompany,
       prospectsByEmployee: byEmployee,
-      prospectsByEmployeeName: p.byEmployeeName,
       prospectsByJobLevel: p.byJobLevel,
+      prospectsByJobRole: p.byJobRole,
       prospectsByEmployeeSize: p.byEmployeeSize,
       prospectsOverTime: p.overTime,
       companiesOverTime: c.overTime,
-      companyRevenue: c.revenue,
     },
   };
 };

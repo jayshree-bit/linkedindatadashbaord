@@ -43,6 +43,7 @@ import { useToast, useConfirm } from "./Feedbackprovider";
 /* ---------- Filter model helpers ---------- */
 
 const OPERATORS = [
+  { id: "dateRange", label: "Date range", text: false, dateOnly: true },
   { id: "contains", label: "Contains", text: true },
   { id: "notContains", label: "Does not contain", text: true },
   { id: "equals", label: "Equals", text: true },
@@ -56,9 +57,32 @@ const OPERATORS = [
 const needsText = (op) => OPERATORS.find((o) => o.id === op)?.text ?? true;
 const isBlankValue = (v) => v === null || v === undefined || v === "";
 const sameValue = (a, b) => (isBlankValue(a) && isBlankValue(b)) || a === b;
-const labelOf = (v) => (isBlankValue(v) ? "(Blanks)" : String(v));
+const labelOf = (v, isDate = false) => {
+  if (isBlankValue(v)) return "(Blanks)";
+  if (isDate) {
+    const date = new Date(v);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleDateString("en-IN", { timeZone: "UTC" });
+    }
+  }
+  return String(v);
+};
 const isAdvanced = (m) =>
   Boolean(m) && (m.values != null || (m.op && m.op !== "contains"));
+const isDateField = (field) => {
+  const key = String(field.key || "").replace(/([a-z])([A-Z])/g, "$1 $2");
+  const name = String(field.name || "");
+  return (
+    field.dateFilter === true ||
+    field.filterType === "date" ||
+    /\b(date|time|timestamp)\b/i.test(`${key} ${name}`) ||
+    /(?:created|updated|scraped|raised)At$/i.test(field.key || "")
+  );
+};
+const isDateOnlyField = (field) =>
+  /\bdate\b/i.test(
+    `${String(field.key || "").replace(/([a-z])([A-Z])/g, "$1 $2")} ${field.name || ""}`,
+  );
 const MAX_SELECT = 1000;
 
 // Columns that stay pinned on the left for the prospect grid.
@@ -173,10 +197,10 @@ function FilterIcon() {
 }
 
 /* Popup: operator list + searchable checklist of the column's values (server-backed) */
-function FilterPopup({ columnKey, anchor, onClose }) {
+function FilterPopup({ columnKey, anchor, onClose, isDate = false }) {
   const { filterModels, setFilterModel, fetchDistinct } = useContext(HeaderCtx);
   const model = filterModels[columnKey] ?? {};
-  const op = model.op ?? "contains";
+  const op = model.op ?? (isDate ? "dateRange" : "contains");
   const values = model.values ?? null;
 
   const [opOpen, setOpOpen] = useState(false);
@@ -257,6 +281,19 @@ function FilterPopup({ columnKey, anchor, onClose }) {
   };
 
   const opLabel = OPERATORS.find((o) => o.id === op)?.label ?? "Contains";
+  const setDateRange = (from, to) => {
+    if (!from && !to && model.values == null) {
+      setFilterModel(columnKey, null);
+      return;
+    }
+    setFilterModel(columnKey, {
+      op: "dateRange",
+      text: "",
+      values: model.values ?? null,
+      from,
+      to,
+    });
+  };
 
   return createPortal(
     <>
@@ -273,26 +310,60 @@ function FilterPopup({ columnKey, anchor, onClose }) {
           onClick={() => setOpOpen((o) => !o)}
         >
           <span>
-            Text Filter <em>{opLabel}</em>
+            {isDate ? "Date Filter" : "Text Filter"} <em>{opLabel}</em>
           </span>
           <span>{opOpen ? "⌄" : "›"}</span>
         </button>
 
         {opOpen && (
           <div className="agf-ops">
-            {OPERATORS.map((o) => (
+            {OPERATORS.filter((o) => !o.dateOnly || isDate).map((o) => (
               <button
                 key={o.id}
                 type="button"
                 className={`agf-opt ${op === o.id ? "on" : ""}`}
                 onClick={() => {
-                  setFilterModel(columnKey, { op: o.id });
+                  setFilterModel(
+                    columnKey,
+                    o.id === "dateRange"
+                      ? { op: o.id, text: "", values: null }
+                      : { op: o.id, from: "", to: "", values: null },
+                  );
                   setOpOpen(false);
                 }}
               >
                 {o.label}
               </button>
             ))}
+          </div>
+        )}
+
+        {isDate && op === "dateRange" && (
+          <div className="agf-search agf-date-range">
+            <label>
+              From
+              <input
+                type="date"
+                value={model.from ?? ""}
+                max={model.to || undefined}
+                onChange={(event) =>
+                  setDateRange(event.target.value, model.to ?? "")
+                }
+                aria-label={`From date for ${columnKey}`}
+              />
+            </label>
+            <label>
+              To
+              <input
+                type="date"
+                value={model.to ?? ""}
+                min={model.from || undefined}
+                onChange={(event) =>
+                  setDateRange(model.from ?? "", event.target.value)
+                }
+                aria-label={`To date for ${columnKey}`}
+              />
+            </label>
           </div>
         )}
 
@@ -335,7 +406,7 @@ function FilterPopup({ columnKey, anchor, onClose }) {
                 checked={isChecked(v)}
                 onChange={() => toggle(v)}
               />
-              <span>{labelOf(v)}</span>
+              <span>{labelOf(v, isDate)}</span>
             </label>
           ))}
 
@@ -379,7 +450,8 @@ function HeaderCell({ column }) {
   } = useContext(HeaderCtx);
   const key = column.key;
   const model = filterModels[key] ?? {};
-  const op = model.op ?? "contains";
+  const isDate = Boolean(column.dateFilter);
+  const op = model.op ?? (isDate ? "dateRange" : "contains");
   const direction =
     sortColumns[0]?.columnKey === key ? sortColumns[0].direction : null;
 
@@ -512,6 +584,7 @@ function HeaderCell({ column }) {
         <FilterPopup
           columnKey={key}
           anchor={popup}
+          isDate={isDate}
           onClose={() => setPopup(null)}
         />
       )}
@@ -582,18 +655,40 @@ const STATUS_COLORS = {
   review: "warning",
 };
 
-const renderFor = (key) => {
-  if (key === "date") {
+const toHref = (v) => (/^https?:/i.test(v) ? v : `https://${v}`);
+
+const renderFor = (key, field = {}) => {
+  const dateField = {
+    key,
+    name: field.name,
+    dateFilter: field.dateFilter,
+    filterType: field.filterType,
+  };
+  const dateFilter = isDateField(dateField);
+  const dateOnly = isDateOnlyField(dateField);
+  const dateTimestamp = [
+    "updatedAt",
+    "createdAt",
+    "scrapedAt",
+    "lastRaisedAt",
+  ].includes(key);
+  if (key === "date" || dateOnly || (dateFilter && !dateTimestamp)) {
     return ({ row }) => {
       if (!row[key]) return null;
       const date = new Date(row[key]);
       return Number.isNaN(date.getTime())
         ? row[key]
-        : date.toLocaleDateString("en-IN");
+        : date.toLocaleDateString("en-IN", { timeZone: "UTC" });
     };
   }
-  if (key === "updatedAt" || key === "createdAt") {
+  if (dateTimestamp) {
     return ({ row }) => (row[key] ? new Date(row[key]).toLocaleString() : null);
+  }
+  // Logo / photo columns show the image itself instead of the URL text.
+  if (/logo$/i.test(key)) {
+    return ({ row }) =>
+      row[key] ? <a href={`${row[key]}`}>{row[key]}</a> : null;
+
   }
   if (key === "Status" || key === "EBB Status") {
     return ({ row }) => {
@@ -607,13 +702,21 @@ const renderFor = (key) => {
     return ({ row }) =>
       row[key] ? <a href={`mailto:${row[key]}`}>{row[key]}</a> : null;
   }
-  if (/link|website|linkedin/i.test(key)) {
+  if (/^(domain|companyDomain)$/i.test(key)) {
+    return ({ row }) =>
+      row[key] ? (
+        <a href={toHref(row[key])} target="_blank" rel="noreferrer">
+          {row[key]}
+        </a>
+      ) : null;
+  }
+  // "linkedinFollowers" etc. are numbers, not links.
+  if (/link|website|linkedin/i.test(key) && !/followers|size|status/i.test(key)) {
     return ({ row }) => {
       const value = row[key];
       if (!value) return null;
-      const href = /^https?:/i.test(value) ? value : `https://${value}`;
       return (
-        <a href={href} target="_blank" rel="noreferrer">
+        <a href={toHref(value)} target="_blank" rel="noreferrer">
           {value}
         </a>
       );
@@ -639,6 +742,164 @@ const initialsOf = (text) =>
     .map((w) => w[0].toUpperCase())
     .join("") || "?";
 
+const SOCIAL_ICONS = {
+  linkedinUrl: {
+    label: "LinkedIn",
+    svg: (
+      <>
+        <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z" />
+        <rect x="2" y="9" width="4" height="12" />
+        <circle cx="4" cy="4" r="2" />
+      </>
+    ),
+  },
+  facebookUrl: {
+    label: "Facebook",
+    svg: (
+      <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z" />
+    ),
+  },
+  instagramUrl: {
+    label: "Instagram",
+    svg: (
+      <>
+        <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+        <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+        <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
+      </>
+    ),
+  },
+  twitterUrl: {
+    label: "Twitter",
+    svg: (
+      <path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z" />
+    ),
+  },
+  youtubeUrl: {
+    label: "YouTube",
+    svg: (
+      <>
+        <path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z" />
+        <polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02" />
+      </>
+    ),
+  },
+  tiktokUrl: {
+    label: "TikTok",
+    svg: (
+      <>
+        <path d="M9 18V5l12-2v13" />
+        <circle cx="6" cy="18" r="3" />
+        <circle cx="18" cy="16" r="3" />
+      </>
+    ),
+  },
+  website: {
+    label: "Website",
+    svg: (
+      <>
+        <circle cx="12" cy="12" r="10" />
+        <line x1="2" y1="12" x2="22" y2="12" />
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </>
+    ),
+  },
+};
+
+/* Social icons: only the ones that have a value are drawn, each links to its URL. */
+function SocialLinks({ row, keys }) {
+  const parsedLinks = {};
+  const socialKeys = {
+    linkedin: "linkedinUrl",
+    facebook: "facebookUrl",
+    instagram: "instagramUrl",
+    twitter: "twitterUrl",
+    x: "twitterUrl",
+    youtube: "youtubeUrl",
+    tiktok: "tiktokUrl",
+    website: "website",
+  };
+  for (const entry of String(row.companySocials || "").split(/\s*[|;\n]\s*/)) {
+    const match = /^\s*([^:]+):\s*(https?:\/\/\S+)/i.exec(entry);
+    if (!match) continue;
+    const key = socialKeys[match[1].trim().toLowerCase()];
+    if (key && (isBlankValue(row[key]) || row[key] === "—")) {
+      parsedLinks[key] = match[2].replace(/[),.;]+$/, "");
+    }
+  }
+  const urlFor = (key) =>
+    isBlankValue(row[key]) || row[key] === "—" ? parsedLinks[key] : row[key];
+  const links = (keys ?? []).filter(
+    (key) => SOCIAL_ICONS[key] && !isBlankValue(urlFor(key)) && urlFor(key) !== "—",
+  );
+  if (!links.length) return null;
+  return (
+    <div className="dgp-social">
+      {links.map((k) => {
+        const icon = SOCIAL_ICONS[k];
+        const href = urlFor(k);
+        return (
+          <a
+            key={k}
+            href={toHref(String(href).trim())}
+            target="_blank"
+            rel="noreferrer"
+            title={icon.label}
+            aria-label={icon.label}
+            className={`dgp-social-link dgp-social-${k}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              {icon.svg}
+            </svg>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+/* Round photo (people) or square logo (companies); falls back to initials. */
+function CardAvatar({ url, text, square }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [url]);
+  if (url && !failed) {
+    return (
+      <img
+        src={url}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        style={{
+          width: "100%",
+          height: "100%",
+          borderRadius: square ? 8 : "50%",
+          objectFit: square ? "contain" : "cover",
+        }}
+      />
+    );
+  }
+  return initialsOf(text);
+}
+
+/* A card item is either a field key or { key, label, alt: [fallback keys] }. */
+const itemKey = (item) => (typeof item === "string" ? item : item.key);
+const itemAlt = (item) =>
+  typeof item === "object" && Array.isArray(item.alt) ? item.alt : [];
+const resolveKey = (row, item) =>
+  [itemKey(item), ...itemAlt(item)].find((k) => !isBlankValue(row[k])) ??
+  itemKey(item);
+
 function RecordCard({
   row,
   cfg,
@@ -652,28 +913,8 @@ function RecordCard({
   const title = cfg.title(row);
   const subtitle = cfg.subtitle?.(row);
   const badge = cfg.badgeKey ? row[cfg.badgeKey] : null;
-  function Avatar({ url, text }) {
-    const [failed, setFailed] = useState(false);
-    useEffect(() => setFailed(false), [url]);
+  const isLogo = cfg.imageShape === "square";
 
-    if (url && !failed) {
-      return (
-        <img
-          src={url}
-          alt=""
-          referrerPolicy="no-referrer"
-          onError={() => setFailed(true)}
-          style={{
-            width: "100%",
-            height: "100%",
-            borderRadius: "50%",
-            objectFit: "cover",
-          }}
-        />
-      );
-    }
-    return initialsOf(text);
-  }
   return (
     <article className={`dgp-card-item ${selected ? "is-selected" : ""}`}>
       <header className="dgp-ci-head">
@@ -686,51 +927,59 @@ function RecordCard({
             aria-label={`Select ${title}`}
           />
         )}
-        <div className="dgp-ci-avatar" aria-hidden="true">
-          <Avatar url={row.profilePhotoUrl} text={title} />
+        <div
+          className={`dgp-ci-avatar ${isLogo ? "dgp-ci-avatar--logo" : ""}`}
+          aria-hidden="true"
+        >
+          <CardAvatar
+            url={row[cfg.imageKey ?? "profilePhotoUrl"]}
+            text={title}
+            square={isLogo}
+          />
         </div>
         <div className="dgp-ci-id">
           <h3 title={title}>{title}</h3>
-          {subtitle && <p title={subtitle}>{subtitle}</p>}
+         
+            <SocialLinks row={row} keys={cfg.socialKeys} />
         </div>
         {badge && (
           <span className={`dgp-pill dgp-pill-${pillColor(badge)}`}>
             {badge}
           </span>
         )}
+       
       </header>
+
 
       <dl className="dgp-ci-body">
         {cfg.items.map((item) => {
-  // Support both string keys and { key, label } objects
-  const key = typeof item === "string" ? item : item.key;
+          const baseKey = itemKey(item);
+          const f = fieldMap.get(baseKey);
+          if (!f) return null;
 
-  const f = fieldMap.get(key);
-  if (!f) return null;
+          const key = resolveKey(row, item);
+          const label =
+            typeof item === "object" && item.label ? item.label : f.name;
+          const render = renderFor(key, f);
+          const value = row[key];
 
-  const label =
-    typeof item === "object" && item.label
-      ? item.label
-      : f.name;
+          return (
+            <div key={baseKey} className="dgp-ci-row">
+              <dt>{label}</dt>
+              <dd>
+                {isBlankValue(value) ? (
+                  <span className="dgp-ci-empty">—</span>
+                ) : render ? (
+                  render({ row })
+                ) : (
+                  String(value)
+                )}
+              </dd>
+            </div>
+          );
+        })}
+             
 
-  const render = renderFor(key);
-  const value = row[key];
-
-  return (
-    <div key={key} className="dgp-ci-row">
-      <dt>{label}</dt>
-      <dd>
-        {isBlankValue(value) ? (
-          <span className="dgp-ci-empty">—</span>
-        ) : render ? (
-          render({ row })
-        ) : (
-          String(value)
-        )}
-      </dd>
-    </div>
-  );
-})}
       </dl>
 
       <footer className="dgp-ci-foot">
@@ -776,8 +1025,16 @@ function RecordModal({ row, cfg, fields, onClose }) {
 
   const title = cfg.title(row);
   const subtitle = cfg.subtitle?.(row);
-  const onCard = new Set(cfg.items);
-  const rest = fields.filter((f) => !onCard.has(f.key));
+  const isLogo = cfg.imageShape === "square";
+
+  // modalShowAll = true -> list every field (companies); otherwise only the
+  // fields that are not already shown on the card.
+  const onCard = new Set(
+    cfg.items.flatMap((i) => [itemKey(i), ...itemAlt(i)]),
+  );
+  const rest = cfg.modalShowAll
+    ? fields
+    : fields.filter((f) => !onCard.has(f.key));
   const visible = showEmpty
     ? rest
     : rest.filter((f) => !isBlankValue(row[f.key]));
@@ -792,12 +1049,20 @@ function RecordModal({ row, cfg, fields, onClose }) {
         onClick={(e) => e.stopPropagation()}
       >
         <header className="dgp-modal-head">
-          <div className="dgp-ci-avatar lg" aria-hidden="true">
-            {initialsOf(title)}
+          <div
+            className={`dgp-ci-avatar lg ${isLogo ? "dgp-ci-avatar--logo" : ""}`}
+            aria-hidden="true"
+          >
+            <CardAvatar
+              url={row[cfg.imageKey ?? "profilePhotoUrl"]}
+              text={title}
+              square={isLogo}
+            />
           </div>
           <div className="dgp-ci-id">
             <h3>{title}</h3>
             {subtitle && <p>{subtitle}</p>}
+            <SocialLinks row={row} keys={cfg.socialKeys} />
           </div>
           {cfg.badgeKey && row[cfg.badgeKey] && (
             <span
@@ -833,7 +1098,7 @@ function RecordModal({ row, cfg, fields, onClose }) {
             <div className="dgp-muted">No additional details.</div>
           )}
           {visible.map((f) => {
-            const render = renderFor(f.key);
+            const render = renderFor(f.key, f);
             const value = row[f.key];
             return (
               <div key={f.key} className="dgp-md-row">
@@ -843,6 +1108,8 @@ function RecordModal({ row, cfg, fields, onClose }) {
                     <span className="dgp-ci-empty">—</span>
                   ) : render ? (
                     render({ row })
+                  ) : Array.isArray(value) ? (
+                    value.join(", ")
                   ) : (
                     String(value)
                   )}
@@ -874,6 +1141,9 @@ export default function DataGridPage({
   fixedFilters = NO_FIXED_FILTERS,
   cardConfig,
   defaultSort = NO_SORT,
+  externalData,
+  headerActions,
+  headerSubtitle,
 }) {
   const dispatch = useDispatch();
   const toast = useToast();
@@ -881,8 +1151,26 @@ export default function DataGridPage({
   const { user } = useSelector((state) => state.auth);
   const dataState = useSelector((state) => state.data);
   const isDark = useIsDark();
-  const rows = dataState[resource] ?? [];
-  const pagination = dataState.pagination?.[resource] ?? {
+  const externalMode = Boolean(externalData);
+  const externalRows = externalData?.rows;
+  const externalPagination = externalData?.pagination;
+  const externalLoading = externalData?.loading;
+  const externalError = externalData?.error;
+  const externalQuery = externalData?.onQueryChange;
+  const externalDistinct = externalData?.getDistinct;
+  const externalExport = externalData?.onExport;
+  const externalKey = externalData?.key;
+  const rows = externalMode ? externalRows ?? [] : dataState[resource] ?? [];
+  const pagination = externalMode
+    ? externalPagination ?? {
+        page: 1,
+        limit: 25,
+        total: 0,
+        totalPages: 1,
+        hasNextPage: false,
+        hasPrevPage: false,
+      }
+    : dataState.pagination?.[resource] ?? {
     page: 1,
     limit: 25,
     total: 0,
@@ -890,20 +1178,24 @@ export default function DataGridPage({
     hasNextPage: false,
     hasPrevPage: false,
   };
-  const loading = dataState.loading;
-  const error = dataState.error;
-  const canEdit = can(user, resource, "edit");
+  const loading = externalMode ? Boolean(externalLoading) : dataState.loading;
+  const error = externalMode ? externalError : dataState.error;
+  const canEdit = !externalMode && can(user, resource, "edit");
+
+  // cardConfig.defaultView = "card" opens the page in card view (used by Companies).
+  const startInCards = cardConfig?.defaultView === "card";
 
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(25);
-  const [sortColumns, setSortColumns] = useState([
-    {
-      columnKey: "updatedAt", // Use the exact Updated At field key
-      direction: "DESC",
-    },
-  ]);
+  const [limit, setLimit] = useState(startInCards ? 12 : 25);
+  const [sortColumns, setSortColumns] = useState(() =>
+    externalMode
+      ? []
+      : defaultSort.length
+        ? defaultSort
+        : [{ columnKey: "updatedAt", direction: "DESC" }],
+  );
   const [filterModels, setFilterModels] = useState({});
   const [filters, setFilters] = useState({});
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
@@ -916,7 +1208,6 @@ export default function DataGridPage({
     fields.map((f) => f.key),
   );
   const [importOpen, setImportOpen] = useState(false);
-  const [exportBytes, setExportBytes] = useState(0);
   const sortBy = sortColumns[0]?.columnKey ?? "";
 
   const sortOrder = sortColumns[0]?.direction === "DESC" ? "desc" : "asc";
@@ -924,9 +1215,8 @@ export default function DataGridPage({
   const [exportStatus, setExportStatus] = useState("");
   const [companyList, setCompanyList] = useState(null); // { listId, domainCount, nameCount, fileName }
   const [listError, setListError] = useState("");
-  const listInputRef = useRef(null);
   const [showListModal, setShowListModal] = useState(false);
-  const [view, setView] = useState("table"); // "table" | "card"
+  const [view, setView] = useState(startInCards ? "card" : "table"); // "table" | "card"
   const [detailRow, setDetailRow] = useState(null);
   const fieldMap = useMemo(
     () => new Map(fields.map((f) => [f.key, f])),
@@ -953,19 +1243,21 @@ export default function DataGridPage({
   const [linkedinJob, setLinkedinJob] = useState(null);
   const [linkedinQueue, setLinkedinQueue] = useState([]);
   const [jobStartedAt, setJobStartedAt] = useState(null);
-const [jobEndedAt, setJobEndedAt] = useState(null);
-const [now, setNow] = useState(() => Date.now());
-// Timing stats for the LinkedIn job panel
-const elapsedMs = jobStartedAt ? (jobEndedAt ?? now) - jobStartedAt : 0;
-const doneCount = linkedinJob?.results?.length ?? 0;
-const avgMs = doneCount ? elapsedMs / doneCount : 0;
-const remainingCount = Math.max(0, (linkedinJob?.total ?? 0) - doneCount);
-const etaMs =
-  linkedinJob?.state === "running" && doneCount ? avgMs * remainingCount : null;
+  const [jobEndedAt, setJobEndedAt] = useState(null);
+  const [now, setNow] = useState(() => Date.now());
+  // Timing stats for the LinkedIn job panel
+  const elapsedMs = jobStartedAt ? (jobEndedAt ?? now) - jobStartedAt : 0;
+  const doneCount = linkedinJob?.results?.length ?? 0;
+  const avgMs = doneCount ? elapsedMs / doneCount : 0;
+  const remainingCount = Math.max(0, (linkedinJob?.total ?? 0) - doneCount);
+  const etaMs =
+    linkedinJob?.state === "running" && doneCount
+      ? avgMs * remainingCount
+      : null;
   // The Action column calls this ref so the columns memo does not rebuild
   // every time the delete handler changes.
   const deleteRowRef = useRef(() => {});
-  const showActions = resource === "prospect" && canEdit;
+  const showActions = !externalMode && resource === "prospect" && canEdit;
 
   const [colQuery, setColQuery] = useState("");
   const [colMenuOpen, setColMenuOpen] = useState(false);
@@ -974,18 +1266,17 @@ const etaMs =
   const gridWrapRef = useRef(null);
   const [colActive, setColActive] = useState(0);
   const colFindRef = useRef(null);
-  const [logOpen, setLogOpen] = useState(false);
 
   const effectiveFilters = useMemo(
     () => ({
       ...filters,
-      ...(companyList
+      ...(!externalMode && companyList
         ? { companyListId: { op: "equals", text: companyList.listId } }
         : {}),
       ...fixedFilters,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filters, fixedKey, companyList],
+    [filters, fixedKey, companyList, externalMode],
   );
 
   // Go back to page 1 when the dashboard link (status / employee) changes.
@@ -1003,25 +1294,38 @@ const etaMs =
   }, [searchInput]);
 
   // Re-render once a second while a job is running
-useEffect(() => {
-  if (!jobStartedAt || jobEndedAt) return;
-  const t = setInterval(() => setNow(Date.now()), 1000);
-  return () => clearInterval(t);
-}, [jobStartedAt, jobEndedAt]);
   useEffect(() => {
-    setSelectedRows(new Set());
-  }, [resource, search, effectiveFilters]);
+    if (!jobStartedAt || jobEndedAt) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [jobStartedAt, jobEndedAt]);
+
   // Debounced column filters -> server filter model
   useEffect(() => {
     const timer = setTimeout(() => {
       const next = {};
       for (const [key, m] of Object.entries(filterModels)) {
-        const op = m.op ?? "contains";
+        const op = m.op ?? (isDateField(fieldMap.get(key) || {}) ? "dateRange" : "contains");
         const text = needsText(op) ? (m.text ?? "").trim() : "";
         const hasText = needsText(op) ? Boolean(text) : true;
         const hasValues = m.values != null;
-        if (!hasText && !hasValues) continue;
-        next[key] = { op, text, values: m.values ?? null };
+        const hasDateRange = Boolean(m.from || m.to);
+        if (
+          op === "dateRange"
+            ? !hasDateRange && !hasValues
+            : !hasText && !hasValues
+        ) {
+          continue;
+        }
+        next[key] =
+          op === "dateRange"
+            ? {
+                op,
+                from: m.from || "",
+                to: m.to || "",
+                values: m.values ?? null,
+              }
+            : { op, text, values: m.values ?? null };
       }
       setFilters((prev) =>
         JSON.stringify(prev) === JSON.stringify(next) ? prev : next,
@@ -1029,9 +1333,21 @@ useEffect(() => {
       setPage(1);
     }, 400);
     return () => clearTimeout(timer);
-  }, [filterModels]);
+  }, [filterModels, fieldMap]);
 
   useEffect(() => {
+    if (externalMode) {
+      externalQuery?.({
+        page,
+        limit,
+        search,
+        sortBy,
+        sortOrder,
+        filters: effectiveFilters,
+      });
+      return;
+    }
+
     dispatch(
       fetchRows({
         resource,
@@ -1045,6 +1361,8 @@ useEffect(() => {
     );
   }, [
     dispatch,
+    externalMode,
+    externalQuery,
     resource,
     page,
     limit,
@@ -1064,13 +1382,19 @@ useEffect(() => {
     (key, valueSearch) => {
       // The checklist ignores this column's own filter so all of its values stay visible.
       const { [key]: _own, ...others } = filtersRef.current;
+      if (externalMode) {
+        return externalDistinct?.(key, valueSearch, {
+          search: searchRef.current,
+          filters: others,
+        }) ?? Promise.resolve({ values: [], hasMore: false });
+      }
       return getDistinctApi(resource, key, {
         search: searchRef.current,
         filters: others,
         valueSearch,
       });
     },
-    [resource],
+    [externalMode, externalDistinct, resource],
   );
   const STATUS_KEY = "status";
   const hasStatusField = fieldMap.has(STATUS_KEY);
@@ -1078,6 +1402,7 @@ useEffect(() => {
   const [statusOptions, setStatusOptions] = useState([]);
 
   useEffect(() => {
+    if (externalMode) return;
     if (view !== "card" || !hasStatusField || statusLocked) return;
     let cancelled = false;
     fetchDistinct(STATUS_KEY, "")
@@ -1089,18 +1414,26 @@ useEffect(() => {
     return () => {
       cancelled = true;
     };
-  }, [view, hasStatusField, statusLocked, fetchDistinct]);
+  }, [externalMode, view, hasStatusField, statusLocked, fetchDistinct]);
+
+  useEffect(() => {
+    if (!externalMode) return;
+    const keys = fields.map((field) => field.key);
+    setVisibleKeys(keys);
+    setColumnOrder(keys);
+    setPage(1);
+    setSearchInput("");
+    setSearch("");
+    setFilterModels({});
+    setFilters({});
+    setSortColumns([]);
+  }, [externalMode, externalKey, fields]);
 
   const activeStatus =
     filterModels[STATUS_KEY]?.op === "equals"
       ? (filterModels[STATUS_KEY].text ?? "")
       : "";
 
-  const pickStatus = (value) =>
-    headerCtx.setFilterModel(
-      STATUS_KEY,
-      value ? { op: "equals", text: value, values: null } : null,
-    );
   // Fields in the user's chosen order (new fields that appear later are appended).
   const orderedFields = useMemo(() => {
     const byKey = new Map(fields.map((f) => [f.key, f]));
@@ -1161,6 +1494,12 @@ useEffect(() => {
     }),
     [sortColumns, filterModels, fetchDistinct, moveColumn],
   );
+
+  const pickStatus = (value) =>
+    headerCtx.setFilterModel(
+      STATUS_KEY,
+      value ? { op: "equals", text: value, values: null } : null,
+    );
 
   const columns = useMemo(() => {
     const offset = (pagination.page - 1) * pagination.limit;
@@ -1243,19 +1582,23 @@ useEffect(() => {
       cellClass: "dgp-center-cell",
       headerCellClass: "dgp-center-cell",
       renderHeaderCell: () => <div className="agh agh-index">Sr. No.</div>,
-      renderCell: ({ rowIdx }) => (
-        <span className="text-muted">{offset + rowIdx + 1}</span>
+      renderCell: ({ row, rowIdx }) => (
+        <span className="text-muted">
+          {row.rowNumber ?? offset + rowIdx + 1}
+        </span>
       ),
     };
 
     const dataCols = orderedFields
       .filter((field) => visibleKeys.includes(field.key))
       .map((field) => {
+      const dateFilter = isDateField(field);
         const sticky =
           resource === "prospect" && STICKY_NAME_KEYS.has(normKey(field.key));
         return {
           key: field.key,
           name: field.name,
+          dateFilter,
           minWidth: 180,
           width: sticky ? 200 : 220,
           frozen: sticky,
@@ -1265,7 +1608,11 @@ useEffect(() => {
           headerCellClass:
             field.key === highlightKey ? "dgp-col-hl-head" : undefined,
           renderHeaderCell: (props) => <HeaderCell {...props} />,
-          renderCell: renderFor(field.key),
+          renderCell: renderFor(field.key, {
+            ...field,
+            dateFilter,
+            dateOnly: isDateOnlyField(field),
+          }),
           renderEditCell: canEdit ? textEditor : undefined,
         };
       });
@@ -1276,7 +1623,7 @@ useEffect(() => {
 
     return [
       ...(showActions ? [actionCol] : []),
-      selectCol,
+      ...(!externalMode ? [selectCol] : []),
       rowNumber,
       ...stickyCols,
       ...otherCols,
@@ -1286,6 +1633,7 @@ useEffect(() => {
     visibleKeys,
     canEdit,
     showActions,
+    externalMode,
     resource,
     pagination.page,
     pagination.limit,
@@ -1309,6 +1657,7 @@ useEffect(() => {
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, []);
+
   const goToColumn = (key) => {
     const field = fields.find((f) => f.key === key);
     if (!field) return;
@@ -1340,6 +1689,7 @@ useEffect(() => {
     }
     setPendingScroll(null);
   }, [pendingScroll, columns]);
+
   const clearSelection = useCallback(() => {
     selectedCache.current.clear();
     setSelectedRows(new Set());
@@ -1381,7 +1731,7 @@ useEffect(() => {
     handleSelectedRowsChange(next);
   };
 
-  const selectableCards = resource === "prospect" && canEdit;
+  const selectableCards = !externalMode && resource === "prospect" && canEdit;
   const pageIds = rows.map((r) => r._id);
   const allOnPage =
     pageIds.length > 0 && pageIds.every((id) => selectedRows.has(id));
@@ -1404,13 +1754,24 @@ useEffect(() => {
     Array.from(selectedRows)
       .map((id) => selectedCache.current.get(id))
       .filter(Boolean);
+
+  // Clear ticked rows whenever the result set changes.
   useEffect(() => {
     clearSelection();
   }, [resource, search, effectiveFilters, clearSelection]);
 
   const reloadCurrentPage = () =>
-    dispatch(
-      fetchRows({
+    externalMode
+      ? externalQuery?.({
+          page,
+          limit,
+          search,
+          sortBy,
+          sortOrder,
+          filters: effectiveFilters,
+        })
+      : dispatch(
+          fetchRows({
         resource,
         page,
         limit,
@@ -1418,8 +1779,8 @@ useEffect(() => {
         sortBy,
         sortOrder,
         filters: effectiveFilters,
-      }),
-    );
+          }),
+        );
 
   // always points to the newest reload function
   const reloadRef = useRef(reloadCurrentPage);
@@ -1507,17 +1868,17 @@ useEffect(() => {
           reloadRef.current();
         }
 
-      if (s.state === "failed") {
-        setJobEndedAt((e) => e ?? Date.now());
-        clearJobMeta();
-        throw new Error(s.error || "LinkedIn update failed");
-      }
-      if (s.state === "done" || s.state === "stopped") {
-        setJobEndedAt((e) => e ?? Date.now());
-        clearJobMeta();
-        last = s;
-        break;
-      }
+        if (s.state === "failed") {
+          setJobEndedAt((e) => e ?? Date.now());
+          clearJobMeta();
+          throw new Error(s.error || "LinkedIn update failed");
+        }
+        if (s.state === "done" || s.state === "stopped") {
+          setJobEndedAt((e) => e ?? Date.now());
+          clearJobMeta();
+          last = s;
+          break;
+        }
       }
 
       const results = Array.isArray(last?.results) ? last.results : [];
@@ -1576,9 +1937,9 @@ useEffect(() => {
 
     setLinkedinQueue(queue);
     const startedAt = Date.now();
-setJobStartedAt(startedAt);
-setJobEndedAt(null);
-setNow(startedAt);
+    setJobStartedAt(startedAt);
+    setJobEndedAt(null);
+    setNow(startedAt);
     setLinkedinBusy(true);
     setLinkedinStatus("Starting...");
     setLinkedinJob({
@@ -1596,7 +1957,7 @@ setNow(startedAt);
       const jobId = started.jobId ?? started.job_id;
       if (!jobId) throw new Error("No job id returned.");
 
-      saveJobMeta({ jobId, total: records.length, queue,startedAt  }); // survives refresh
+      saveJobMeta({ jobId, total: records.length, queue, startedAt }); // survives refresh
       setLinkedinJob((j) => (j ? { ...j, jobId } : j));
       clearSelection();
 
@@ -1619,6 +1980,7 @@ setNow(startedAt);
 
   // After a page refresh, pick the running job back up.
   useEffect(() => {
+    if (externalMode) return;
     if (resource !== "prospect") return;
     const meta = loadJobMeta();
     if (!meta?.jobId) return;
@@ -1639,12 +2001,12 @@ setNow(startedAt);
     setJobStartedAt(meta.startedAt ?? Date.now());
     setJobEndedAt(null);
     setNow(Date.now());
- 
+
     return () => {
       pollRunRef.current++; // stop the loop when leaving the page
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resource]);
+  }, [resource, externalMode]);
 
   const onRowsChange = (newRows, { indexes }) => {
     indexes.forEach((index) => {
@@ -1672,6 +2034,22 @@ setNow(startedAt);
       const exportColumns = orderedFields
         .filter((f) => visibleKeys.includes(f.key))
         .map((f) => ({ key: f.key, name: f.name }));
+
+      if (externalMode) {
+        const blob = await externalExport({
+          search,
+          sortBy,
+          sortOrder,
+          filters: effectiveFilters,
+          columns: exportColumns,
+        });
+        saveBlob(
+          blob,
+          `${resource}-raw-${new Date().toISOString().slice(0, 10)}.xlsx`,
+        );
+        toast.success("Export downloaded.");
+        return;
+      }
 
       const { jobId } = await exportStartApi(resource, {
         search,
@@ -1726,15 +2104,6 @@ setNow(startedAt);
     );
   };
 
-  const addBlank = () => {
-    dispatch(
-      addRow({
-        resource,
-        row: Object.fromEntries(fields.map((f) => [f.key, ""])),
-      }),
-    );
-  };
-
   const toggleColumn = (key) =>
     setVisibleKeys((current) =>
       current.includes(key)
@@ -1745,26 +2114,12 @@ setNow(startedAt);
     setPage(1);
   }, [companyList]);
 
-  const onPickCompanyList = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setListError("");
-    try {
-      const res = await uploadCompanyListApi(file);
-      setCompanyList({ ...res, fileName: file.name });
-    } catch (err) {
-      setListError(err?.response?.data?.message || "Could not read the file.");
-    }
-  };
   // Clears only the user's own filters; the locked URL filters stay.
   const clearAll = () => {
     setFilterModels({});
     setSearchInput("");
     setSortColumns([]);
   };
-  const sortChanged =
-    JSON.stringify(sortColumns) !== JSON.stringify(defaultSort);
 
   const activeCount =
     Object.keys(filters).length +
@@ -1784,13 +2139,18 @@ setNow(startedAt);
       <div className="dgp-card dgp-head">
         <div>
           <h2 className="dgp-title">{title}</h2>
+          {headerSubtitle && (
+            <p className="dgp-muted">{headerSubtitle}</p>
+          )}
           <span className="dgp-badge">
             {pagination.total.toLocaleString()} total records
           </span>
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-3">
-          {resource === "prospect" && canEdit && (
+          {headerActions}
+
+          {!externalMode && resource === "prospect" && canEdit && (
             <button
               type="button"
               className="dgp-btn dgp-btn-primary"
@@ -1800,7 +2160,7 @@ setNow(startedAt);
             </button>
           )}
 
-          {resource === "company" && canEdit && (
+          {!externalMode && resource === "company" && canEdit && (
             <button
               type="button"
               onClick={() => setImportOpen(true)}
@@ -1810,7 +2170,8 @@ setNow(startedAt);
             </button>
           )}
 
-          {(resource === "prospect" || resource === "company") && (
+          {!externalMode &&
+            (resource === "prospect" || resource === "company") && (
             <button
               type="button"
               className="dgp-btn"
@@ -1820,7 +2181,10 @@ setNow(startedAt);
             </button>
           )}
 
-          {resource === "prospect" && canEdit && selectedRows.size > 0 && (
+          {!externalMode &&
+            resource === "prospect" &&
+            canEdit &&
+            selectedRows.size > 0 && (
             <button
               type="button"
               className="dgp-btn dgp-btn-primary"
@@ -1832,7 +2196,7 @@ setNow(startedAt);
                 : `Update LinkedIn Profile (${selectedRows.size})`}
             </button>
           )}
-          {selectedRows.size > 0 && (
+          {!externalMode && selectedRows.size > 0 && (
             <button
               type="button"
               className="dgp-btn"
@@ -1843,20 +2207,23 @@ setNow(startedAt);
           )}
         </div>
 
-        <CompanyListModal
-          open={showListModal}
-          onClose={() => setShowListModal(false)}
-          onApplied={setCompanyList}
-        />
+        {!externalMode && (
+          <CompanyListModal
+            open={showListModal}
+            onClose={() => setShowListModal(false)}
+            onApplied={setCompanyList}
+          />
+        )}
 
-        {showImport && (
+        {!externalMode && showImport && (
           <ImportExcelModal
             onClose={() => setShowImport(false)}
             onImported={onImported}
           />
         )}
       </div>
-      {linkedinJob && (
+
+      {!externalMode && linkedinJob && (
         <div className="dgp-card" style={{ padding: 16 }}>
           <div
             style={{
@@ -1873,26 +2240,31 @@ setNow(startedAt);
               {linkedinJob.state === "failed" && " (failed)"}
             </strong>
             {jobStartedAt && (
-  <div
-    className="dgp-muted"
-    style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 8 }}
-  >
-    <span>
-      {jobEndedAt ? "Total time" : "Elapsed"}:{" "}
-      <strong>{formatDuration(elapsedMs)}</strong>
-    </span>
-    {doneCount > 0 && (
-      <span>
-        Avg per profile: <strong>{formatDuration(avgMs)}</strong>
-      </span>
-    )}
-    {etaMs != null && (
-      <span>
-        Est. remaining: <strong>~{formatDuration(etaMs)}</strong>
-      </span>
-    )}
-  </div>
-)}
+              <div
+                className="dgp-muted"
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 16,
+                  marginBottom: 8,
+                }}
+              >
+                <span>
+                  {jobEndedAt ? "Total time" : "Elapsed"}:{" "}
+                  <strong>{formatDuration(elapsedMs)}</strong>
+                </span>
+                {doneCount > 0 && (
+                  <span>
+                    Avg per profile: <strong>{formatDuration(avgMs)}</strong>
+                  </span>
+                )}
+                {etaMs != null && (
+                  <span>
+                    Est. remaining: <strong>~{formatDuration(etaMs)}</strong>
+                  </span>
+                )}
+              </div>
+            )}
             {!linkedinBusy && (
               <div style={{ display: "flex", gap: 8 }}>
                 {linkedinJob.jobId && (
@@ -2053,6 +2425,7 @@ setNow(startedAt);
           dispatch(fetchRows({ resource: "company", page: 1, limit: 10 }))
         }
       />
+
       <div className="dgp-card">
         <div className="dgp-toolbar">
           <div className="dgp-search">
@@ -2068,6 +2441,7 @@ setNow(startedAt);
               aria-label={`Search ${title}`}
             />
           </div>
+
           <div className="dgp-colfind" ref={colFindRef}>
             <input
               type="text"
@@ -2110,9 +2484,6 @@ setNow(startedAt);
                 onClick={() => {
                   setHighlightKey(null);
                   setColQuery("");
-                   setLinkedinJob(null);
-  setJobStartedAt(null);
-  setJobEndedAt(null);
                 }}
               >
                 Clear
@@ -2169,17 +2540,19 @@ setNow(startedAt);
               </button>
             )}
 
-            <button
-              type="button"
-              className="dgp-btn dgp-btn-success"
-              onClick={exportExcel}
-              disabled={exporting || pagination.total === 0}
-              title="Download all rows matching the current search, sort and filters"
-            >
-              {exporting
-                ? exportStatus || "Exporting..."
-                : `Export Excel (${pagination.total.toLocaleString()})`}
-            </button>
+            {(!externalMode || externalExport) && (
+              <button
+                type="button"
+                className="dgp-btn dgp-btn-success"
+                onClick={exportExcel}
+                disabled={exporting || pagination.total === 0}
+                title="Download all rows matching the current search, sort and filters"
+              >
+                {exporting
+                  ? exportStatus || "Exporting..."
+                  : `Export Excel (${pagination.total.toLocaleString()})`}
+              </button>
+            )}
 
             <div className="dgp-menu-wrap">
               <button
@@ -2418,7 +2791,8 @@ setNow(startedAt);
 
           {!loading && rows.length === 0 && (
             <div className="dgp-empty">
-              No records match your search or filters.
+              {externalData?.emptyMessage ??
+                "No records match your search or filters."}
             </div>
           )}
         </div>
@@ -2494,6 +2868,7 @@ setNow(startedAt);
           </nav>
         </div>
       </div>
+
       {detailRow && (
         <RecordModal
           row={detailRow}

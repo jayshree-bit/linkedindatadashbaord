@@ -25,6 +25,7 @@ const navigation = [
         children: [
           { name: "Dashboard", path: "/prospects/dashbaord" },
           { name: "All Prospects", path: "/prospects/viewall" },
+          { name: "Raw Prospects", path: "/prospects/raw" },
         ],
       },
       {
@@ -32,6 +33,10 @@ const navigation = [
         path: "/companies",
         icon: "▤",
         resource: "company",
+        children: [
+          { name: "All Companies", path: "/companies" },
+          { name: "Raw Companies", path: "/companies/raw" },
+        ],
       },
       {
         name: "User management",

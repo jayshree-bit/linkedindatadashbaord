@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { useDispatch, useSelector } from 'react-redux';
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { useDispatch, useSelector } from "react-redux";
 import {
   Area,
   AreaChart,
@@ -15,13 +15,14 @@ import {
   Tooltip,
   XAxis,
   YAxis,
-} from 'recharts';
-import { can } from '../features/authSlice';
-import { fetchDashboard } from '../features/dataSlice';
+} from "recharts";
+import { can } from "../features/authSlice";
+import { fetchDashboard } from "../features/dataSlice";
 
 /* ---------- helpers ---------- */
-const pad = (n) => String(n).padStart(2, '0');
-const toISO = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const pad = (n) => String(n).padStart(2, "0");
+const toISO = (d) =>
+  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
 const today = () => toISO(new Date());
 const monthStart = () => {
@@ -34,14 +35,18 @@ const daysAgo = (n) => {
   return toISO(d);
 };
 
-const nf = new Intl.NumberFormat('en-IN');
-const compact = new Intl.NumberFormat('en-IN', {
-  notation: 'compact',
+const nf = new Intl.NumberFormat("en-IN");
+const compact = new Intl.NumberFormat("en-IN", {
+  notation: "compact",
   maximumFractionDigits: 1,
 });
 const shortDate = (iso) => {
   const d = new Date(`${iso}T00:00:00Z`);
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC' });
+  return d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    timeZone: "UTC",
+  });
 };
 
 /* Fill days with no records so the line is continuous. */
@@ -74,57 +79,88 @@ const buildTimeline = (from, to, prospects = [], companies = []) => {
   return out;
 };
 
-const PALETTE = ['#6366f1', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#ef4444', '#84cc16'];
-const AXIS = '#94a3b8';
-const GRID = 'rgba(148,163,184,0.25)';
+const PALETTE = [
+  "#6366f1",
+  "#10b981",
+  "#f59e0b",
+  "#8b5cf6",
+  "#ec4899",
+  "#06b6d4",
+  "#ef4444",
+  "#84cc16",
+];
+const AXIS = "#94a3b8";
+const GRID = "rgba(148,163,184,0.25)";
 
 const tooltipStyle = {
   contentStyle: {
     borderRadius: 12,
-    border: '1px solid rgba(148,163,184,0.3)',
-    boxShadow: '0 10px 30px rgba(15,23,42,0.15)',
+    border: "1px solid rgba(148,163,184,0.3)",
+    boxShadow: "0 10px 30px rgba(15,23,42,0.15)",
     fontSize: 12,
   },
-  cursor: { fill: 'rgba(99,102,241,0.08)' },
+  cursor: { fill: "rgba(99,102,241,0.08)" },
 };
 
 const cardClass =
-  'rounded-2xl border border-slate-200/80 bg-white shadow-sm transition-colors duration-300 dark:border-slate-800 dark:bg-slate-900';
+  "rounded-2xl border border-slate-200/80 bg-white shadow-sm transition-colors duration-300 dark:border-slate-800 dark:bg-slate-900";
 
 const kpiColors = {
-  indigo: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300',
-  emerald: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300',
-  amber: 'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300',
-  violet: 'bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300',
-  sky: 'bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-300',
-  rose: 'bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-300',
+  indigo:
+    "bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300",
+  emerald:
+    "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300",
+  amber: "bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300",
+  violet:
+    "bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300",
+  sky: "bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-300",
+  rose: "bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-300",
 };
 
 /* ---------- small UI pieces ---------- */
 function Kpi({ title, value, sub, icon, color, loading }) {
   return (
-    <article className={`${cardClass} p-5 hover:-translate-y-1 hover:shadow-lg dark:hover:shadow-black/20`}>
+    <article
+      className={`${cardClass} p-5 hover:-translate-y-1 hover:shadow-lg dark:hover:shadow-black/20`}
+    >
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{title}</p>
-        <span className={`flex h-10 w-10 items-center justify-center rounded-xl text-lg ${kpiColors[color]}`}>
+        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+          {title}
+        </p>
+        <span
+          className={`flex h-10 w-10 items-center justify-center rounded-xl text-lg ${kpiColors[color]}`}
+        >
           {icon}
         </span>
       </div>
       {loading ? (
         <div className="mt-5 h-8 w-24 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
       ) : (
-        <p className="mt-5 text-3xl font-bold tracking-tight text-slate-900 dark:text-white">{value}</p>
+        <p className="mt-5 text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
+          {value}
+        </p>
       )}
       <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">{sub}</p>
     </article>
   );
 }
 
-function ChartCard({ title, subtitle, loading, empty, className = '', children }) {
+function ChartCard({
+  title,
+  subtitle,
+  loading,
+  empty,
+  className = "",
+  children,
+}) {
   return (
     <section className={`${cardClass} p-5 ${className}`}>
       <h3 className="font-bold text-slate-900 dark:text-white">{title}</h3>
-      {subtitle && <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>}
+      {subtitle && (
+        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+          {subtitle}
+        </p>
+      )}
       <div className="mt-4 h-72">
         {loading && !children ? (
           <div className="h-full animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" />
@@ -140,14 +176,27 @@ function ChartCard({ title, subtitle, loading, empty, className = '', children }
   );
 }
 
-const truncate = (s, n = 16) => (String(s).length > n ? `${String(s).slice(0, n - 1)}…` : s);
+const truncate = (s, n = 16) =>
+  String(s).length > n ? `${String(s).slice(0, n - 1)}…` : s;
 
-function HBar({ data, dataKey = 'count', labelKey = 'label', color = '#6366f1', format = nf.format }) {
+function HBar({
+  data,
+  dataKey = "count",
+  labelKey = "label",
+  color = "#6366f1",
+  format = nf.format,
+}) {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={data} layout="vertical" margin={{ left: 8, right: 24 }}>
         <CartesianGrid horizontal={false} stroke={GRID} />
-        <XAxis type="number" tick={{ fill: AXIS, fontSize: 11 }} tickFormatter={compact.format} axisLine={false} tickLine={false} />
+        <XAxis
+          type="number"
+          tick={{ fill: AXIS, fontSize: 11 }}
+          tickFormatter={compact.format}
+          axisLine={false}
+          tickLine={false}
+        />
         <YAxis
           type="category"
           dataKey={labelKey}
@@ -157,17 +206,20 @@ function HBar({ data, dataKey = 'count', labelKey = 'label', color = '#6366f1', 
           axisLine={false}
           tickLine={false}
         />
-        <Tooltip {...tooltipStyle} formatter={(v) => [format(v), 'Count']} />
+        <Tooltip {...tooltipStyle} formatter={(v) => [format(v), "Count"]} />
         <Bar dataKey={dataKey} radius={[0, 8, 8, 0]} barSize={16}>
           {data.map((_, i) => (
-            <Cell key={i} fill={color === 'multi' ? PALETTE[i % PALETTE.length] : color} />
+            <Cell
+              key={i}
+              fill={color === "multi" ? PALETTE[i % PALETTE.length] : color}
+            />
           ))}
         </Bar>
       </BarChart>
     </ResponsiveContainer>
   );
 }
-function EmployeeTable({ rows }) {
+function UploaderTable({ rows }) {
   const sum = (key) => rows.reduce((acc, r) => acc + (r[key] || 0), 0);
 
   return (
@@ -175,7 +227,7 @@ function EmployeeTable({ rows }) {
       <table className="w-full text-sm">
         <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800">
           <tr className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            <th className="px-4 py-3 text-left font-semibold">Employee name</th>
+            <th className="px-4 py-3 text-left font-semibold">Uploaded by</th>
             <th className="px-4 py-3 text-right font-semibold">Qualified</th>
             <th className="px-4 py-3 text-right font-semibold">Disqualified</th>
             <th className="px-4 py-3 text-right font-semibold">Total</th>
@@ -183,8 +235,13 @@ function EmployeeTable({ rows }) {
         </thead>
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
           {rows.map((r) => (
-            <tr key={r.label} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-              <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{r.label}</td>
+            <tr
+              key={r.label}
+              className="hover:bg-slate-50 dark:hover:bg-slate-800/50"
+            >
+              <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">
+                {r.label}
+              </td>
               <td className="px-4 py-3 text-right">
                 <span className="rounded-md bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300">
                   {nf.format(r.qualified)}
@@ -195,16 +252,22 @@ function EmployeeTable({ rows }) {
                   {nf.format(r.disqualified)}
                 </span>
               </td>
-              <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">{nf.format(r.count)}</td>
+              <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">
+                {nf.format(r.count)}
+              </td>
             </tr>
           ))}
         </tbody>
         <tfoot className="sticky bottom-0 bg-slate-50 font-bold dark:bg-slate-800">
           <tr className="text-slate-900 dark:text-white">
             <td className="px-4 py-3">Total</td>
-            <td className="px-4 py-3 text-right">{nf.format(sum('qualified'))}</td>
-            <td className="px-4 py-3 text-right">{nf.format(sum('disqualified'))}</td>
-            <td className="px-4 py-3 text-right">{nf.format(sum('count'))}</td>
+            <td className="px-4 py-3 text-right">
+              {nf.format(sum("qualified"))}
+            </td>
+            <td className="px-4 py-3 text-right">
+              {nf.format(sum("disqualified"))}
+            </td>
+            <td className="px-4 py-3 text-right">{nf.format(sum("count"))}</td>
           </tr>
         </tfoot>
       </table>
@@ -233,40 +296,39 @@ export default function Dashboard() {
   const charts = data?.charts;
 
   const timeline = useMemo(
-    () => buildTimeline(from, to, charts?.prospectsOverTime, charts?.companiesOverTime),
-    [from, to, charts]
+    () =>
+      buildTimeline(
+        from,
+        to,
+        charts?.prospectsOverTime,
+        charts?.companiesOverTime,
+      ),
+    [from, to, charts],
   );
 
-  const employeeData = useMemo(
+  const uploaderData = useMemo(
     () =>
       (charts?.prospectsByEmployee ?? []).map((r) => ({
         ...r,
         other: Math.max(0, r.count - r.qualified - r.disqualified),
       })),
-    [charts]
+    [charts],
   );
 
   const sizeData = charts?.prospectsByEmployeeSize ?? [];
   const jobLevelData = charts?.prospectsByJobLevel ?? [];
-const employeeNameData = useMemo(
-  () =>
-    (charts?.prospectsByEmployeeName ?? []).map((r) => ({
-      ...r,
-      other: Math.max(0, r.count - r.qualified - r.disqualified),
-    })),
-  [charts]
-);
+  const jobRoleData = charts?.prospectsByJobRole ?? [];
   const showSkeleton = loading && !data;
 
   const presets = [
-    { label: 'Today', from: today(), to: today() },
-    { label: 'Last 7 days', from: daysAgo(6), to: today() },
-    { label: 'Last 30 days', from: daysAgo(29), to: today() },
-    { label: 'This month', from: monthStart(), to: today() },
+    { label: "Today", from: today(), to: today() },
+    { label: "Last 7 days", from: daysAgo(6), to: today() },
+    { label: "Last 30 days", from: daysAgo(29), to: today() },
+    { label: "This month", from: monthStart(), to: today() },
   ];
 
   const dateInput =
-    'rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:ring-indigo-500/30';
+    "rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:ring-indigo-500/30";
 
   return (
     <div className="space-y-8 text-slate-900 transition-colors duration-300 dark:text-slate-100">
@@ -275,13 +337,13 @@ const employeeNameData = useMemo(
         <div className="pointer-events-none absolute -right-12 -top-24 h-72 w-72 rounded-full border-[40px] border-white/10" />
         <div className="relative z-10 max-w-2xl">
           <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-            Welcome back{user?.name ? `, ${user.name}` : ''}!
+            Welcome back{user?.name ? `, ${user.name}` : ""}!
           </h1>
           <p className="mt-3 text-sm leading-6 text-indigo-100 sm:text-base">
             Track prospect and company activity for any date range.
           </p>
           <div className="mt-5 flex flex-wrap gap-3">
-            {can(user, 'prospect', 'view') && (
+            {can(user, "prospect", "view") && (
               <Link
                 to="/prospects/viewall"
                 className="rounded-xl bg-white px-5 py-2.5 text-sm font-bold text-indigo-700 shadow-md transition hover:-translate-y-0.5 hover:bg-indigo-50"
@@ -289,7 +351,7 @@ const employeeNameData = useMemo(
                 View prospects →
               </Link>
             )}
-            {can(user, 'company', 'view') && (
+            {can(user, "company", "view") && (
               <Link
                 to="/companies"
                 className="rounded-xl border border-white/30 bg-white/10 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20"
@@ -304,9 +366,13 @@ const employeeNameData = useMemo(
       {/* Date filter */}
       <section className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white">Performance overview</h2>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+            Performance overview
+          </h2>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            {loading ? 'Updating…' : 'Select a date range to refresh the dashboard'}
+            {loading
+              ? "Updating…"
+              : "Select a date range to refresh the dashboard"}
           </p>
         </div>
 
@@ -324,8 +390,8 @@ const employeeNameData = useMemo(
                   }}
                   className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
                     active
-                      ? 'border-indigo-600 bg-indigo-600 text-white'
-                      : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'
+                      ? "border-indigo-600 bg-indigo-600 text-white"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
                   }`}
                 >
                   {p.label}
@@ -336,11 +402,23 @@ const employeeNameData = useMemo(
 
           <label className="text-xs font-medium text-slate-500 dark:text-slate-400">
             From
-            <input type="date" className={`${dateInput} mt-1 block`} value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} />
+            <input
+              type="date"
+              className={`${dateInput} mt-1 block`}
+              value={from}
+              max={to || undefined}
+              onChange={(e) => setFrom(e.target.value)}
+            />
           </label>
           <label className="text-xs font-medium text-slate-500 dark:text-slate-400">
             To
-            <input type="date" className={`${dateInput} mt-1 block`} value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
+            <input
+              type="date"
+              className={`${dateInput} mt-1 block`}
+              value={to}
+              min={from || undefined}
+              onChange={(e) => setTo(e.target.value)}
+            />
           </label>
         </div>
       </section>
@@ -357,24 +435,36 @@ const employeeNameData = useMemo(
       )}
 
       {/* KPI cards */}
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <Kpi title="Total prospects" value={nf.format(totals?.prospects ?? 0)} sub="All time" icon="♙" color="indigo" loading={showSkeleton} />
-        <Kpi title="Total companies" value={nf.format(totals?.companies ?? 0)} sub="All time" icon="▤" color="emerald" loading={showSkeleton} />
-        <Kpi title="Prospects in range" value={nf.format(totals?.prospectsInRange ?? 0)} sub={`${shortDate(from)} – ${shortDate(to)}`} icon="◎" color="violet" loading={showSkeleton} />
-        <Kpi title="Companies in range" value={nf.format(totals?.companiesInRange ?? 0)} sub={`${shortDate(from)} – ${shortDate(to)}`} icon="◈" color="sky" loading={showSkeleton} />
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Kpi
-          title="This week"
-          value={nf.format(totals?.prospectsThisWeek ?? 0)}
-          sub={`${nf.format(totals?.companiesThisWeek ?? 0)} companies`}
-          icon="↗"
-          color="amber"
+          title="Prospects in range"
+          value={nf.format(totals?.prospectsInRange ?? 0)}
+          sub={`${shortDate(from)} – ${shortDate(to)}`}
+          icon="◎"
+          color="violet"
           loading={showSkeleton}
         />
         <Kpi
-          title="Today"
-          value={nf.format(totals?.prospectsToday ?? 0)}
-          sub={`${nf.format(totals?.companiesToday ?? 0)} companies`}
-          icon="★"
+          title="Companies in range"
+          value={nf.format(totals?.companiesInRange ?? 0)}
+          sub={`${shortDate(from)} – ${shortDate(to)}`}
+          icon="◈"
+          color="sky"
+          loading={showSkeleton}
+        />
+        <Kpi
+          title="Qualified prospects"
+          value={nf.format(totals?.qualifiedInRange ?? 0)}
+          sub={`${shortDate(from)} – ${shortDate(to)}`}
+          icon="✓"
+          color="emerald"
+          loading={showSkeleton}
+        />
+        <Kpi
+          title="Disqualified prospects"
+          value={nf.format(totals?.disqualifiedInRange ?? 0)}
+          sub={`${shortDate(from)} – ${shortDate(to)}`}
+          icon="×"
           color="rose"
           loading={showSkeleton}
         />
@@ -387,10 +477,15 @@ const employeeNameData = useMemo(
           title="Records added over time"
           subtitle="Daily prospects and companies"
           loading={showSkeleton}
-          empty={!showSkeleton && timeline.every((d) => !d.prospects && !d.companies)}
+          empty={
+            !showSkeleton && timeline.every((d) => !d.prospects && !d.companies)
+          }
         >
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={timeline} margin={{ left: -10, right: 10, top: 5 }}>
+            <AreaChart
+              data={timeline}
+              margin={{ left: -10, right: 10, top: 5 }}
+            >
               <defs>
                 <linearGradient id="gProspects" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#6366f1" stopOpacity={0.45} />
@@ -402,12 +497,44 @@ const employeeNameData = useMemo(
                 </linearGradient>
               </defs>
               <CartesianGrid vertical={false} stroke={GRID} />
-              <XAxis dataKey="label" tick={{ fill: AXIS, fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={24} />
-              <YAxis allowDecimals={false} tick={{ fill: AXIS, fontSize: 11 }} axisLine={false} tickLine={false} />
-              <Tooltip {...tooltipStyle} cursor={{ stroke: AXIS, strokeDasharray: 4 }} />
+              <XAxis
+                dataKey="label"
+                tick={{ fill: AXIS, fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                minTickGap={24}
+              />
+              <YAxis
+                allowDecimals={false}
+                tick={{ fill: AXIS, fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip
+                {...tooltipStyle}
+                cursor={{ stroke: AXIS, strokeDasharray: 4 }}
+              />
               <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-              <Area type="monotone" dataKey="prospects" name="Prospects" stroke="#6366f1" strokeWidth={2.5} fill="url(#gProspects)" dot={false} activeDot={{ r: 5 }} />
-              <Area type="monotone" dataKey="companies" name="Companies" stroke="#10b981" strokeWidth={2.5} fill="url(#gCompanies)" dot={false} activeDot={{ r: 5 }} />
+              <Area
+                type="monotone"
+                dataKey="prospects"
+                name="Prospects"
+                stroke="#6366f1"
+                strokeWidth={2.5}
+                fill="url(#gProspects)"
+                dot={false}
+                activeDot={{ r: 5 }}
+              />
+              <Area
+                type="monotone"
+                dataKey="companies"
+                name="Companies"
+                stroke="#10b981"
+                strokeWidth={2.5}
+                fill="url(#gCompanies)"
+                dot={false}
+                activeDot={{ r: 5 }}
+              />
             </AreaChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -420,9 +547,21 @@ const employeeNameData = useMemo(
         >
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
-              <Pie data={sizeData} dataKey="count" nameKey="label" innerRadius="55%" outerRadius="80%" paddingAngle={3} cornerRadius={6}>
+              <Pie
+                data={sizeData}
+                dataKey="count"
+                nameKey="label"
+                innerRadius="55%"
+                outerRadius="80%"
+                paddingAngle={3}
+                cornerRadius={6}
+              >
                 {sizeData.map((_, i) => (
-                  <Cell key={i} fill={PALETTE[i % PALETTE.length]} stroke="none" />
+                  <Cell
+                    key={i}
+                    fill={PALETTE[i % PALETTE.length]}
+                    stroke="none"
+                  />
                 ))}
               </Pie>
               <Tooltip {...tooltipStyle} />
@@ -431,34 +570,62 @@ const employeeNameData = useMemo(
           </ResponsiveContainer>
         </ChartCard>
 
-       <ChartCard
-  className="xl:col-span-2"
-  title="Prospects by employee name"
-  subtitle="Qualified vs disqualified"
-  loading={showSkeleton}
-  empty={!showSkeleton && !employeeNameData.length}
->
-  <ResponsiveContainer width="100%" height="100%">
-    <BarChart data={employeeNameData} layout="vertical" margin={{ left: 8, right: 24 }}>
-      <CartesianGrid horizontal={false} stroke={GRID} />
-      <XAxis type="number" allowDecimals={false} tick={{ fill: AXIS, fontSize: 11 }} tickFormatter={compact.format} axisLine={false} tickLine={false} />
-      <YAxis
-        type="category"
-        dataKey="label"
-        width={120}
-        tick={{ fill: AXIS, fontSize: 11 }}
-        tickFormatter={(v) => truncate(v, 18)}
-        axisLine={false}
-        tickLine={false}
-      />
-      <Tooltip {...tooltipStyle} />
-      <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-      <Bar dataKey="qualified" name="Qualified" stackId="s" fill="#10b981" barSize={16} />
-      <Bar dataKey="disqualified" name="Disqualified" stackId="s" fill="#f43f5e" />
-      <Bar dataKey="other" name="Other" stackId="s" fill="#94a3b8" radius={[0, 8, 8, 0]} />
-    </BarChart>
-  </ResponsiveContainer>
-</ChartCard>
+        <ChartCard
+          className="xl:col-span-2"
+          title="Prospects by uploader"
+          subtitle="Qualified vs disqualified"
+          loading={showSkeleton}
+          empty={!showSkeleton && !uploaderData.length}
+        >
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={uploaderData}
+              layout="vertical"
+              margin={{ left: 8, right: 24 }}
+            >
+              <CartesianGrid horizontal={false} stroke={GRID} />
+              <XAxis
+                type="number"
+                allowDecimals={false}
+                tick={{ fill: AXIS, fontSize: 11 }}
+                tickFormatter={compact.format}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                type="category"
+                dataKey="label"
+                width={120}
+                tick={{ fill: AXIS, fontSize: 11 }}
+                tickFormatter={(v) => truncate(v, 18)}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip {...tooltipStyle} />
+              <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
+              <Bar
+                dataKey="qualified"
+                name="Qualified"
+                stackId="s"
+                fill="#10b981"
+                barSize={16}
+              />
+              <Bar
+                dataKey="disqualified"
+                name="Disqualified"
+                stackId="s"
+                fill="#f43f5e"
+              />
+              <Bar
+                dataKey="other"
+                name="Other"
+                stackId="s"
+                fill="#94a3b8"
+                radius={[0, 8, 8, 0]}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
 
         <ChartCard
           title="Prospects by country"
@@ -468,39 +635,35 @@ const employeeNameData = useMemo(
         >
           <HBar data={charts?.prospectsByCountry ?? []} color="multi" />
         </ChartCard>
+        <div className="grid grid-cols-1 gap-6 xl:col-span-3 xl:grid-cols-2">
+          <ChartCard
+            title="Prospects by job level"
+            subtitle="Top job levels"
+            loading={showSkeleton}
+            empty={!showSkeleton && !jobLevelData.length}
+          >
+            <HBar data={jobLevelData} color="multi" />
+          </ChartCard>
+          <ChartCard
+            title="Prospects by job role"
+            subtitle="Top job roles"
+            loading={showSkeleton}
+            empty={!showSkeleton && !jobRoleData.length}
+          >
+            <HBar data={jobRoleData} color="multi" />
+          </ChartCard>
+        </div>
 
         <ChartCard
-          className="xl:col-span-2"
-          title="Prospects by job level"
-          subtitle="Top job levels"
+          className="xl:col-span-3"
+          title="Uploader-wise prospects"
+          subtitle="Qualified and disqualified count per uploader"
           loading={showSkeleton}
-          empty={!showSkeleton && !(charts?.prospectsByCompany ?? []).length}
+          empty={!showSkeleton && !uploaderData.length}
         >
-           <HBar data={jobLevelData} color="multi" />
-
+          <UploaderTable rows={uploaderData} />
         </ChartCard>
-
-        <ChartCard
-          title="Company revenue"
-          subtitle="Highest numeric revenues"
-          loading={showSkeleton}
-          empty={!showSkeleton && !(charts?.companyRevenue ?? []).length}
-        >
-          <HBar data={charts?.companyRevenue ?? []} dataKey="revenue" color="#f59e0b" format={(v) => compact.format(v)} />
-        </ChartCard>
-        <ChartCard
-  className="xl:col-span-3"
-  title="Employee wise prospects"
-  subtitle="Qualified and disqualified count per employee"
-  loading={showSkeleton}
-  empty={!showSkeleton && !employeeNameData.length}
->
-  <EmployeeTable rows={employeeNameData} />
-</ChartCard>
-
       </div>
     </div>
-
-    
   );
 }

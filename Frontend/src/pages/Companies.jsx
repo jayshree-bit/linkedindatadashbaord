@@ -72,12 +72,30 @@ export default function Companies() {
     { key: 'createdAt', name: 'Created At' },
     { key: 'updatedAt', name: 'Updated At' },
   ];
-
+const COMPANY_CARD = {
+  title: (r) => r.name || "—",
+  subtitle: (r) => r.domain || "",
+  imageKey: "companyLogo",          // logo shown as an image
+  imageShape: "square",
+  socialKeys: [             
+    "linkedinUrl", "facebookUrl", "instagramUrl",
+    "twitterUrl", "youtubeUrl", "tiktokUrl", "website",
+  ],
+  modalShowAll: true,              
+  items: [
+    { key: "industry", label: "Main Industry" },
+    { key: "companySize", label: "Company Size" },
+    { key: 'headquarterPhone', name: 'Headquarter Phone' },
+    { key: "revenue", label: "Revenue" },
+   
+  ],
+};
   return (
     <DataGridPage
       resource="company"
       title="Companies"
       fields={COMPANY_COLUMNS}
+      cardConfig={COMPANY_CARD}
     />
   );
 }

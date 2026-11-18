@@ -191,6 +191,8 @@
   border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; font: inherit;
 }
 .agf-search input:focus { outline: 2px solid #c7d2fe; border-color: #4f46e5; }
+.agf-date-range { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.agf-date-range label { display: grid; gap: 4px; color: #64748b; font-size: 12px; }
 
 .agf-list { max-height: 240px; overflow-y: auto; padding: 4px 12px 8px; }
 .agf-item { display: flex; align-items: center; gap: 10px; margin: 0; padding: 5px 0; cursor: pointer; }
@@ -1298,3 +1300,23 @@ body.dark .dgp {
   border-color: #4f46e5;
   color: #fff;
 }
+.dgp-social {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 0 2px;
+}
+.dgp-social a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid #e5e7eb;
+  color: #4f46e5;
+  transition: background .15s, color .15s;
+}
+.dgp-social a:hover { background: #4f46e5; color: #fff; }
+.dark .dgp-social a { border-color: #374151; color: #a5b4fc; }
+.dark .dgp-ci-avatar--logo { border-color: #374151; }

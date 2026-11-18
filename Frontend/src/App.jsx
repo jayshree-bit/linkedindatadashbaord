@@ -14,6 +14,7 @@ import UserManager from "./pages/UserManager";
 import DashboardProspects from "./pages/Prospects/Dashboard";
 import NotificationPage from "./pages/NotificationPage";
 import UserActivityPage from "./pages/UserActivityPage";
+import RawDataPage from "./pages/RawDataPage";
 export default function App() {
   const dispatch = useDispatch();
   const { initialized, user } = useSelector((state) => state.auth);
@@ -67,6 +68,14 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/prospects/raw"
+          element={
+            <ProtectedRoute resource="prospect">
+              <RawDataPage resource="prospect" />
+            </ProtectedRoute>
+          }
+        />
 
     <Route
     path="/user-activities"
@@ -91,6 +100,14 @@ export default function App() {
           element={
             <ProtectedRoute resource="company">
               <Companies />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/companies/raw"
+          element={
+            <ProtectedRoute resource="company">
+              <RawDataPage resource="company" />
             </ProtectedRoute>
           }
         />

@@ -499,6 +499,13 @@ const normalizeLinkedIn = (value) =>
     .toLowerCase()
     .replace(/\/+$/, "");
 
+const toDate = (v) => {
+  if (!v) return null;
+  const d = v instanceof Date ? v : new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+const dayStr = (d) => d.toISOString().slice(0, 10); // compare by day, ignore time
+
 function getExcelValue(cell) {
   const value = cell.value;
 
@@ -614,10 +621,19 @@ const buildDiff = (existing, src) => {
   for (const [field, raw] of Object.entries(src)) {
     if (NO_UPDATE.has(field)) continue;
     let next = String(raw ?? "").trim();
-    if (!next) continue; // blank cell never overwrites data
+    if (!next) continue;
+    let old = String(existing[field] ?? "").trim();
+
+    if (field === "date") {
+      const nd = toDate(next);
+      if (!nd) continue; // unreadable date: never overwrite
+      const od = toDate(existing.date);
+      next = dayStr(nd);
+      old = od ? dayStr(od) : "";
+    }
     if (field === "emailAddress") next = normalizeEmail(next);
     if (field === "linkedinProfileLink") next = normalizeLinkedIn(next);
-    const old = String(existing[field] ?? "").trim();
+
     if (old !== next) changes[field] = { old, new: next };
   }
   return changes;
@@ -835,7 +851,7 @@ return job;
 
       if (email) seenEmails.add(email);
       if (linkedin) seenLinkedIn.add(linkedin);
- const fileStatus = String(src.status || "").trim().toLowerCase();
+      const fileStatus = String(src.status || "").trim().toLowerCase();
       if (fileStatus && fileStatus !== "qualified") {
         return skip(`Status in file is "${src.status}", not Qualified`);
       }
@@ -843,7 +859,17 @@ return job;
         if (existing.status !== "Qualified") {
           return skip("Exists as DisQualified, not updated");
         }
+         const excelDate = toDate(src.date);
+          const storedDate = toDate(existing.date);
 
+          if (!excelDate) {
+            return skip("No valid date in Excel row, cannot compare with existing date");
+          }
+          if (storedDate && dayStr(excelDate) <= dayStr(storedDate)) {
+            return skip(
+              `Excel date (${dayStr(excelDate)}) is not newer than existing date (${dayStr(storedDate)}), not updated`,
+            );
+          }
         const changes = buildDiff(existing, src);
         const fields = Object.keys(changes);
         if (!fields.length) {
