@@ -4,128 +4,25 @@ import { randomUUID } from 'crypto';
 
 import Company from '../models/Company.js';
 import { emitImportCompleted } from '../utils/importNotifications.js';
+import {
+  COMPANY_COLUMN_MAP as COLUMN_MAP,
+  normalizeCompanyHeader as normalizeHeader,
+} from '../utils/companyImportFields.js';
 
 // =====================================================
 // EXCEL COLUMN MAPPING
 // Excel header -> MongoDB Company field
 // =====================================================
 
-const COLUMN_MAP = {
-  // Basic information
-  'organization id': 'organizationId',
-  'company name': 'name',
-  'company logo': 'companyLogo',
-
-  // LinkedIn
-  'linkedin url': 'linkedinUrl',
-  'company linkedin url': 'linkedinUrl',
-  'sales navigator link': 'salesNavigatorLink',
-  'linkedin followers': 'linkedinFollowers',
-
-  // Website
-  'website': 'website',
-  'domain': 'domain',
-  'company domain': 'domain',
-  'website as per linkedin': 'websiteAsPerLinkedin',
-  'domain rank': 'domainRank',
-
-  // Status
-  'status': 'status',
-  'http status': 'httpStatus',
-  'apollo status': 'apolloStatus',
-  'zoominfo': 'zoominfo',
-  'qc status': 'qcStatus',
-
-  // Social media
-  'facebook url': 'facebookUrl',
-  'instagram': 'instagramUrl',
-  'instagram url': 'instagramUrl',
-  'twitter url': 'twitterUrl',
-  'tiktok': 'tiktokUrl',
-  'tiktok url': 'tiktokUrl',
-  'youtube': 'youtubeUrl',
-  'youtube url': 'youtubeUrl',
-
-  // Address
-  'street address': 'streetAddress',
-  'address 1': 'address1',
-  'city': 'city',
-  'state': 'state',
-  'country': 'country',
-  'postal code': 'zipcode',
-  'zipcode': 'zipcode',
-  'headquarter': 'headquarter',
-  'headquarters': 'headquarter',
-  'headquarter phone': 'headquarterPhone',
-  'primary address': 'primaryAddress',
-  'address link': 'addressLink',
-
-  // Contact
-  'email format': 'emailAddress',
-  'email address': 'emailAddress',
-  'phone number': 'phoneNumber',
-
-  // Company size
-  'company size': 'companySize',
-  'exact employee size': 'exactEmployeeSize',
-  'see employee size': 'exactEmployeeSize',
-  'employee size': 'exactEmployeeSize',
-  'see all employee size': 'exactEmployeeSize',
-  'employee size bracket': 'employeeSize',
-  'employees link': 'employeesLink',
-
-  // Industry
-  'main industry': 'industry',
-  'industry': 'industryDetail',
-  'sub industry': 'subIndustry',
-  'specialties': 'specialties',
-  'type': 'type',
-  'keywords': 'keywords',
-  'technologies': 'technologies',
-
-  // Description
-  'description': 'description',
-
-  // Revenue
-  'revenue': 'revenue',
-  'revenue range': 'revenueRange',
-  'revenue bracket': 'revenueRange',
-  'exact revenue': 'exactRevenue',
-  'revenue link': 'revenueLink',
-  'annual revenue': 'annualRevenue',
-
-  // Stock
-  'stock symbol': 'stockSymbol',
-
-  // Funding
-  'total funding': 'totalFunding',
-  'latest funding': 'latestFunding',
-  'latest funding amount': 'latestFundingAmount',
-  'last raised at': 'lastRaisedAt',
-
-  // Scraping
-  'scraped at': 'scrapedAt',
-
-  // Existing fields
-  'sic code': 'sicCode',
-  'naics code': 'naicsCode',
-  'ra comments': 'raComments',
-  'agent comments': 'raComments',
-  'call notes': 'callNotes',
-  'note1': 'note1',
-  'note2': 'note2',
-  'note3': 'note3',
-};
-
 const TEMPLATE_HEADERS = [
   'Organization ID',
   'Company Name',
   'Company Logo',
   'Email Format',
-  'Phone Number',
+  'FAX',
   'Headquarter Phone',
   'Address 1',
-  'Street Address',
+  'Address 2',
   'City',
   'State',
   'Zipcode',
@@ -145,9 +42,9 @@ const TEMPLATE_HEADERS = [
   'Linkedin Followers',
   'Exact Revenue',
   'Revenue',
-  'Revenue Range',
   'Annual Revenue',
   'Revenue Link',
+  'Competitors',
   'Domain',
   'Website',
   'Website as per LinkedIn',
@@ -180,13 +77,6 @@ const TEMPLATE_HEADERS = [
   'Note3',
 ];
 
-const normalizeHeader = (value) =>
-  String(value ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/_/g, ' ')
-    .replace(/\s+/g, ' ');
-
 for (const header of TEMPLATE_HEADERS) {
   const field = COLUMN_MAP[normalizeHeader(header)];
   if (!field || !Company.schema.path(field)) {
@@ -201,6 +91,7 @@ for (const header of TEMPLATE_HEADERS) {
 const INSERT_CHUNK = 1000;
 const LOOKUP_CHUNK = 5000;
 const JOB_TTL_MS = 30 * 60 * 1000;
+const RAW_COMPANY_COLLECTION = 'raw_Company';
 
 const jobs = new Map();
 
@@ -380,16 +271,21 @@ async function parseCompanies(buffer) {
 
   // Excel column number -> Company field
   const colToField = {};
+  const headersByColumn = {};
 
   sheet.getRow(1).eachCell(
     { includeEmpty: false },
     (cell, colNumber) => {
-      const header = normalizeHeader(getExcelValue(cell));
+      const originalHeader = clean(getExcelValue(cell));
+      const header = normalizeHeader(originalHeader);
 
       const field = COLUMN_MAP[header];
 
       if (field) {
         colToField[colNumber] = field;
+      }
+      if (originalHeader) {
+        headersByColumn[colNumber] = originalHeader;
       }
     }
   );
@@ -399,6 +295,7 @@ async function parseCompanies(buffer) {
     return {
       rows: [],
       missingName: true,
+      worksheetName: sheet.name,
     };
   }
 
@@ -410,6 +307,15 @@ async function parseCompanies(buffer) {
       if (rowNumber === 1) return;
 
       const company = {};
+      const rawData = Object.entries(headersByColumn).map(
+        ([columnNumber, column]) => {
+          const value = row.getCell(Number(columnNumber)).value ?? null;
+          return {
+            column,
+            value,
+          };
+        },
+      );
       let hasData = false;
 
       for (const [colNumber, field] of Object.entries(colToField)) {
@@ -432,7 +338,11 @@ async function parseCompanies(buffer) {
       }
 
       if (hasData) {
-        rows.push(company);
+        rows.push({
+          company,
+          rowNumber,
+          rawData,
+        });
       }
     }
   );
@@ -440,7 +350,227 @@ async function parseCompanies(buffer) {
   return {
     rows,
     missingName: false,
+    worksheetName: sheet.name,
   };
+}
+
+const isDisqualified = (qcStatus) =>
+  String(qcStatus || '').trim().toLowerCase() === 'disqualified';
+
+const organizationKey = (value) => keyOf(value);
+
+const comparableValue = (value) =>
+  String(value ?? '').trim();
+
+const rawOrganizationKey = (rawData) => {
+  const organizationCell = (rawData || []).find(
+    ({ column }) =>
+      COLUMN_MAP[normalizeHeader(column)] === 'organizationId',
+  );
+  return organizationCell ? organizationKey(organizationCell.value) : '';
+};
+
+const rawCellValue = (cell) => {
+  const value = cell?.value;
+  if (value && typeof value === 'object') {
+    if (value.text != null) return String(value.text).trim();
+    if (value.result != null) return String(value.result).trim();
+  }
+  return comparableValue(value);
+};
+
+const mergeRawData = (existingRawData, incomingRawData) => {
+  const rawData = (existingRawData || []).map((cell) => ({ ...cell }));
+  const changes = [];
+
+  for (const incomingCell of incomingRawData || []) {
+    const normalizedHeader = normalizeHeader(incomingCell.column);
+    const mappedField = COLUMN_MAP[normalizedHeader];
+    if (!normalizedHeader || incomingCell.value == null || incomingCell.value === '') {
+      continue;
+    }
+
+    const existingIndex = rawData.findIndex(
+      (cell) => {
+        const existingHeader = normalizeHeader(cell.column);
+        const existingField = COLUMN_MAP[existingHeader];
+        return mappedField
+          ? existingField === mappedField
+          : existingHeader === normalizedHeader;
+      },
+    );
+    if (existingIndex < 0) {
+      rawData.push({ ...incomingCell });
+      changes.push({
+        field: incomingCell.column,
+        from: '',
+        to: rawCellValue(incomingCell),
+      });
+      continue;
+    }
+
+    const currentCell = rawData[existingIndex];
+    if (rawCellValue(currentCell) === rawCellValue(incomingCell)) continue;
+
+    changes.push({
+      field: currentCell.column || incomingCell.column,
+      from: rawCellValue(currentCell),
+      to: rawCellValue(incomingCell),
+    });
+    rawData[existingIndex] = {
+      ...currentCell,
+      value: incomingCell.value,
+    };
+  }
+
+  return { rawData, changes };
+};
+
+async function saveDisqualifiedRows(
+  entries,
+  { importId, fileName, worksheetName, uploader, onChunk },
+) {
+  if (!entries.length) return null;
+
+  const importedAt = new Date();
+  const documents = entries.map(({ rawData, rowNumber }) => ({
+    rawData,
+    _rawImport: {
+      importId,
+      resource: 'company',
+      sourceFile: fileName,
+      worksheet: worksheetName,
+      rowNumber,
+      uploadedBy: String(uploader.id),
+      uploadedByName: uploader.name,
+      importedAt,
+    },
+  }));
+  const collection = Company.db.collection(RAW_COMPANY_COLLECTION);
+
+  let processed = 0;
+  for (const part of chunk(documents, INSERT_CHUNK)) {
+    await collection.insertMany(part, { ordered: true });
+    processed += part.length;
+    onChunk?.(processed);
+  }
+
+  return importId;
+}
+
+async function findExistingByOrganizationId(organizationIds) {
+  const existing = new Map();
+  const values = [...new Set(organizationIds.map(clean).filter(Boolean))];
+
+  for (const part of chunk(values, LOOKUP_CHUNK)) {
+    const docs = await Company.find(
+      {
+        organizationId: {
+          $in: part.map(
+            (value) =>
+              new RegExp(
+                `^${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+                'i',
+              ),
+          ),
+        },
+      },
+      { organizationId: 1, name: 1, country: 1, nameKey: 1 },
+    ).lean();
+
+    for (const doc of docs) {
+      const key = organizationKey(doc.organizationId);
+      if (key && !existing.has(key)) existing.set(key, doc);
+    }
+  }
+
+  return existing;
+}
+
+async function findRawByOrganizationId(organizationIds) {
+  const collection = Company.db.collection(RAW_COMPANY_COLLECTION);
+  const existing = new Map();
+  const values = [...new Set(organizationIds.map(clean).filter(Boolean))];
+  const queryValues = values.flatMap((value) => {
+    const numericValue = Number(value);
+    const stringValue = new RegExp(
+      `^${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+      'i',
+    );
+    return Number.isSafeInteger(numericValue)
+      ? [stringValue, numericValue]
+      : [stringValue];
+  });
+  const headerPattern = /^(organization[\s_-]*id|org[\s_-]*id)$/i;
+
+  for (const part of chunk(queryValues, LOOKUP_CHUNK)) {
+    const docs = await collection
+      .find({
+        rawData: {
+          $elemMatch: {
+            column: { $regex: headerPattern },
+            value: { $in: part },
+          },
+        },
+      })
+      .toArray();
+
+    for (const doc of docs) {
+      const rawKey = rawOrganizationKey(doc.rawData);
+      const matchedId = values.find((value) => {
+        if (organizationKey(value) === rawKey) return true;
+        const requestedNumber = Number(value);
+        const existingNumber = Number(rawKey);
+        return (
+          Number.isSafeInteger(requestedNumber) &&
+          Number.isSafeInteger(existingNumber) &&
+          requestedNumber === existingNumber
+        );
+      });
+      const key = organizationKey(matchedId);
+      if (key && !existing.has(key)) existing.set(key, doc);
+    }
+  }
+
+  return existing;
+}
+
+async function updateExistingRows(updates, onChunk) {
+  if (!updates.length) return 0;
+
+  let processed = 0;
+  for (const part of chunk(updates, INSERT_CHUNK)) {
+    await Company.bulkWrite(
+      part.map(({ id, fields }) => ({
+        updateOne: {
+          filter: { _id: id },
+          update: { $set: fields },
+        },
+      })),
+      { ordered: true },
+    );
+    processed += part.length;
+    onChunk?.(processed);
+  }
+
+  return updates.length;
+}
+
+async function updateExistingRawRows(updates) {
+  if (!updates.length) return;
+
+  const collection = Company.db.collection(RAW_COMPANY_COLLECTION);
+  for (const part of chunk(updates, INSERT_CHUNK)) {
+    await collection.bulkWrite(
+      part.map(({ id, rawData }) => ({
+        updateOne: {
+          filter: { _id: id },
+          update: { $set: { rawData } },
+        },
+      })),
+      { ordered: true },
+    );
+  }
 }
 
 // =====================================================
@@ -529,6 +659,7 @@ async function runImportJob(
   job,
   {
     buffer,
+    fileName,
     uploader,
     io,
   }
@@ -543,6 +674,7 @@ async function runImportJob(
     const {
       rows: parsed,
       missingName,
+      worksheetName,
     } = await parseCompanies(buffer);
 
     if (missingName) {
@@ -560,14 +692,22 @@ async function runImportJob(
     }
 
     const importBatchId = randomUUID();
+    const disqualifiedImportId = randomUUID();
 
     // Step 2: Validate company names
     const rows = [];
+    const disqualifiedRows = [];
 
     let invalidCount = 0;
 
-    for (const company of parsed) {
-      if (!company.name) {
+    for (const entry of parsed) {
+      const { company } = entry;
+      if (isDisqualified(company.qcStatus)) {
+        disqualifiedRows.push(entry);
+        continue;
+      }
+
+      if (!company.name && !company.organizationId) {
         invalidCount++;
         continue;
       }
@@ -584,66 +724,166 @@ async function runImportJob(
       });
     }
 
-    updateJob(job, {
-      percent: 10,
-      totalRows: parsed.length,
-    });
-
-    if (!rows.length) {
+    if (!rows.length && !disqualifiedRows.length) {
       return updateJob(job, {
         state: 'failed',
         error: 'No valid company names found in the Excel file.',
       });
     }
 
-    // Step 3: Check database duplicates
     updateJob(job, {
-      stage: 'Checking duplicates',
+      percent: 10,
+      totalRows: parsed.length,
+    });
+
+    // Step 3: Match existing records by Organization ID.
+    updateJob(job, {
+      stage: 'Checking Organization IDs',
       processed: null,
       total: null,
     });
 
+    const organizationIds = parsed
+      .map(({ company }) => company.organizationId)
+      .filter(Boolean);
+    const [existingCompanies, existingRawRows] = await Promise.all([
+      findExistingByOrganizationId(organizationIds),
+      findRawByOrganizationId(organizationIds),
+    ]);
+
+    const rawUpdates = new Map();
+    const changedRecords = new Map();
+    const rawInsertEntries = [];
+    for (const entry of parsed) {
+      const { company, rawData } = entry;
+      const organizationId = company.organizationId || '';
+      const key = organizationKey(organizationId);
+      if (key && existingRawRows.has(key)) {
+        const existingRaw = existingRawRows.get(key);
+        const current = rawUpdates.get(String(existingRaw._id));
+        const merged = mergeRawData(
+          current?.rawData || existingRaw.rawData,
+          rawData,
+        );
+        if (merged.changes.length || current) {
+          rawUpdates.set(String(existingRaw._id), {
+            id: existingRaw._id,
+            rawData: merged.rawData,
+          });
+        }
+        if (merged.changes.length) {
+          const record = changedRecords.get(key) || {
+            organizationId,
+            company: [],
+            rawCompanies: [],
+          };
+          record.rawCompanies.push(...merged.changes);
+          changedRecords.set(key, record);
+        }
+      } else if (isDisqualified(company.qcStatus)) {
+        rawInsertEntries.push(entry);
+      }
+    }
+
+    if (rawInsertEntries.length) {
+      await saveDisqualifiedRows(rawInsertEntries, {
+        importId: disqualifiedImportId,
+        fileName,
+        worksheetName,
+        uploader,
+      });
+    }
+    const existingCompanyUpdates = new Map();
+    const updateCompanyChanges = new Map();
+    const newRows = [];
+    for (const row of rows) {
+      const key = organizationKey(row.organizationId);
+      if (!key || !existingCompanies.has(key)) {
+        if (!row.name) {
+          invalidCount++;
+          continue;
+        }
+        newRows.push(row);
+        continue;
+      }
+
+      const existing = existingCompanies.get(key);
+      const currentUpdate = existingCompanyUpdates.get(String(existing._id));
+      const fields = { ...(currentUpdate?.fields || {}) };
+      const changes = [];
+      for (const [field, value] of Object.entries(row)) {
+        if (value === '' || value == null) continue;
+        if (['nameKey', 'uploadedBy', 'uploadedByName', 'importBatchId'].includes(field)) {
+          continue;
+        }
+        const oldValue = fields[field] !== undefined ? fields[field] : existing[field];
+        if (comparableValue(oldValue) !== comparableValue(value)) {
+          changes.push({ field, from: comparableValue(oldValue), to: comparableValue(value) });
+        }
+        fields[field] = value;
+      }
+      fields.nameKey = keyOf(fields.name || existing.name);
+      fields.uploadedBy = uploader.id;
+      fields.uploadedByName = uploader.name;
+      fields.importBatchId = importBatchId;
+      if (changes.length) {
+        existingCompanyUpdates.set(String(existing._id), {
+          id: existing._id,
+          fields,
+        });
+        const record = changedRecords.get(key) || {
+          organizationId: row.organizationId,
+          company: [],
+          rawCompanies: [],
+        };
+        record.company.push(...changes);
+        changedRecords.set(key, record);
+        updateCompanyChanges.set(String(existing._id), key);
+      } else if (currentUpdate) {
+        existingCompanyUpdates.set(String(existing._id), {
+          id: existing._id,
+          fields,
+        });
+      }
+    }
+
+    // Step 4: Check duplicates for new companies only.
     const names = [
       ...new Set(
-        rows.map((row) => row.nameKey)
+        newRows.map((row) => row.nameKey)
       ),
     ];
 
-    const existing = await findExisting(
-      names,
-      (done, total) => {
-        updateJob(job, {
-          percent: scale(10, 30, done, total),
-        });
-      }
-    );
+    const existing = await findExisting(names);
 
     // Step 4: Check duplicates inside Excel
     const seen = new Set();
+    const seenOrganizationIds = new Set();
 
     const uniqueRows = [];
     const duplicates = [];
 
-    for (const row of rows) {
+    for (const row of newRows) {
       const key = dupKey(
         row.name,
         row.country
       );
+      const organizationId = organizationKey(row.organizationId);
 
       const inDb = existing.has(key);
-      const inFile = seen.has(key);
+      const duplicateOrganizationId =
+        organizationId && seenOrganizationIds.has(organizationId);
+      const inFile = seen.has(key) || duplicateOrganizationId;
 
       if (inDb || inFile) {
         duplicates.push({
           name: row.name,
           country: row.country || '',
           emailAddress: row.emailAddress || '',
-
-          reason: `${
-            inDb
-              ? 'Already exists in database'
-              : 'Duplicate row in uploaded Excel'
-          } (same company name and country)`,
+          organizationId: row.organizationId || '',
+          reason: duplicateOrganizationId
+            ? 'Duplicate Organization ID in uploaded Excel'
+            : `${inDb ? 'Already exists in database' : 'Duplicate row in uploaded Excel'} (same company name and country)`,
         });
 
         continue;
@@ -652,14 +892,20 @@ async function runImportJob(
       uniqueRows.push(row);
 
       seen.add(key);
+      if (organizationId) seenOrganizationIds.add(organizationId);
     }
+
+    const updatedCompanyCount = await updateExistingRows(
+      [...existingCompanyUpdates.values()],
+    );
+    await updateExistingRawRows([...rawUpdates.values()]);
 
     // Step 5: Save companies
     updateJob(job, {
       stage: 'Saving rows',
       percent: 30,
       processed: 0,
-      total: uniqueRows.length,
+      total: uniqueRows.length + updatedCompanyCount,
     });
 
     const {
@@ -673,8 +919,8 @@ async function runImportJob(
           percent: scale(
             30,
             99,
-            done,
-            uniqueRows.length
+            done + updatedCompanyCount,
+            uniqueRows.length + updatedCompanyCount
           ),
         });
       }
@@ -682,15 +928,25 @@ async function runImportJob(
 
     // Step 6: Complete import
     const failedCount = uniqueRows.length - inserted;
+    const updatedCount = updateCompanyChanges.size;
+    const changedFields = [...changedRecords.values()]
+      .filter((record) => record.company.length || record.rawCompanies.length)
+      .slice(0, 500);
+    const changedFieldsTotal = [...changedRecords.values()].filter(
+      (record) => record.company.length || record.rawCompanies.length,
+    ).length;
 
     updateJob(job, {
       state: 'done',
       stage: 'Completed',
       percent: 100,
-      processed: uniqueRows.length,
+      processed: uniqueRows.length + updatedCount,
 
       result: {
-        message: 'Company Excel import completed.',
+        message:
+          updatedCount || rawUpdates.size
+            ? `Import complete. Updated ${updatedCount} Company records and ${rawUpdates.size} Raw Companies rows with matching Organization IDs.`
+            : 'Import complete. No existing records required changes for the Organization IDs in this file.',
 
         importBatchId,
 
@@ -700,11 +956,24 @@ async function runImportJob(
         totalRows: parsed.length,
 
         importedCount: inserted,
+        updatedCount,
+        updatedRawCount: rawUpdates.size,
         failedCount,
         invalidCount,
         duplicateCount: duplicates.length,
+        disqualifiedCount: disqualifiedRows.length,
+        disqualifiedImportId:
+          rawInsertEntries.length ? disqualifiedImportId : null,
 
         duplicates: duplicates.slice(0, 500),
+        disqualifiedRows: disqualifiedRows.slice(0, 500).map(({ company }) => ({
+          name: company.name || '',
+          emailAddress: company.emailAddress || '',
+          qcStatus: company.qcStatus || '',
+          reason: 'Disqualified QC status — saved to Raw Companies',
+        })),
+        changedFields,
+        changedFieldsTotal,
 
         ...(errors.length && {
           errors: errors.slice(0, 5),
@@ -719,14 +988,14 @@ async function runImportJob(
       uploaderName:
         uploader.name || 'Unknown user',
 
-      totalImported: inserted,
-      companyCount: inserted,
+      totalImported: inserted + updatedCount,
+      companyCount: inserted + updatedCount,
 
       status: 'success',
 
       message: `${
         uploader.name || 'A user'
-      } imported ${inserted} companies`,
+      } imported ${inserted} companies and updated ${updatedCount}`,
     });
 
     return job;
@@ -819,6 +1088,7 @@ export async function importCompaniesExcel(
 
     runImportJob(job, {
       buffer: req.file.buffer,
+      fileName: req.file.originalname,
       uploader,
       io,
     }).catch((error) => {

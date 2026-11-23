@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import DataGridPage from '../../components/DataGridPage';
 import DateRangeFilter from '../../components/DateRangeFilter';
 import LinkedinLogPanel from '../../components/LinkedinLogPanel';
-const fields = [
+export const prospectFields = [
   { key: 'employeeCode', name: 'Employee Code' },
   { key: 'employeeName', name: 'Employee Name' },
   { key: 'date', name: 'Date' },
@@ -27,7 +27,7 @@ const fields = [
   { key: 'seeAllEmployeeSize', name: 'Company Employee Count' },
   { key: 'employeeSize', name: 'Employee Size Range' },
   { key: 'exactRevenue', name: 'Exact Revenue' },
-  { key: 'revenue', name: 'Revenue Range' },
+  { key: 'Competitors', name: 'Competitors' },
   { key: 'companyDomain', name: 'Company Domain' },
   { key: 'website', name: 'Website' },
   { key: 'companyLinkedinUrl', name: 'Company LinkedIn URL' },
@@ -114,7 +114,11 @@ export default function Prospects() {
 
   const fixedFilters = useMemo(() => {
     const f = {};
-    if (statusFilter) f.status = { op: 'equals', text: statusFilter, values: null };
+    f.status = {
+      op: 'equals',
+      text: statusFilter || 'Qualified',
+      values: null,
+    };
     if (userId) f.userId = { op: 'equals', text: userId, values: null };
     if (tab === 'updated') {
       f.note1 = { op: 'contains', text: UPDATE_MARK, values: null };
@@ -149,8 +153,8 @@ const DEFAULT_SORT = [{ columnKey: 'updatedAt', direction: 'DESC' }];
     <>
       <div className="dgp-tabs" role="tablist">
         {[
-          ['all', 'All'],
-          ['updated', 'Updated'],
+          ['all', 'All Data'],
+          ['updated', 'Nurture Updated'],
           ['pending', 'Not updated'], 
            ['log', 'Download log'],
         ].map(([id, label]) => (
@@ -177,7 +181,7 @@ const DEFAULT_SORT = [{ columnKey: 'updatedAt', direction: 'DESC' }];
         <DataGridPage
           resource="prospect"
           title={`${employee ? `${baseTitle} – ${employee}` : baseTitle}${tabLabel}`}
-          fields={fields}
+          fields={prospectFields}
           fixedFilters={fixedFilters}
           cardConfig={cardConfig}
           defaultSort={DEFAULT_SORT}

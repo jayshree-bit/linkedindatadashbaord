@@ -741,10 +741,10 @@ const initialsOf = (text) =>
     .slice(0, 2)
     .map((w) => w[0].toUpperCase())
     .join("") || "?";
-
 const SOCIAL_ICONS = {
   linkedinUrl: {
     label: "LinkedIn",
+    color: "#0A66C2",
     svg: (
       <>
         <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z" />
@@ -755,12 +755,14 @@ const SOCIAL_ICONS = {
   },
   facebookUrl: {
     label: "Facebook",
+    color: "#1877F2",
     svg: (
       <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z" />
     ),
   },
   instagramUrl: {
     label: "Instagram",
+    color: "#E4405F",
     svg: (
       <>
         <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
@@ -770,13 +772,15 @@ const SOCIAL_ICONS = {
     ),
   },
   twitterUrl: {
-    label: "Twitter",
+    label: "Twitter / X",
+    color: "#000000",
     svg: (
       <path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z" />
     ),
   },
   youtubeUrl: {
     label: "YouTube",
+    color: "#FF0000",
     svg: (
       <>
         <path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z" />
@@ -786,6 +790,7 @@ const SOCIAL_ICONS = {
   },
   tiktokUrl: {
     label: "TikTok",
+    color: "#000000",
     svg: (
       <>
         <path d="M9 18V5l12-2v13" />
@@ -796,11 +801,12 @@ const SOCIAL_ICONS = {
   },
   website: {
     label: "Website",
+    color: "#64748B",
     svg: (
       <>
         <circle cx="12" cy="12" r="10" />
         <line x1="2" y1="12" x2="22" y2="12" />
-        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1 4-10 15.3 15.3 0 0 1 4-10z" />
       </>
     ),
   },
@@ -856,7 +862,7 @@ function SocialLinks({ row, keys, label }) {
               width="16"
               height="16"
               fill="none"
-              stroke="currentColor"
+              stroke={icon.color}
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -1155,6 +1161,7 @@ export default function DataGridPage({
   externalData,
   headerActions,
   headerSubtitle,
+  hideInternalTools = false,
 }) {
   const dispatch = useDispatch();
   const toast = useToast();
@@ -1269,6 +1276,9 @@ export default function DataGridPage({
   // every time the delete handler changes.
   const deleteRowRef = useRef(() => {});
   const showActions = !externalMode && resource === "prospect" && canEdit;
+  const showExternalActions =
+    externalMode && typeof externalData?.onDeleteRow === "function";
+  const externalDeleteRowRef = useRef(async () => false);
 
   const [colQuery, setColQuery] = useState("");
   const [colMenuOpen, setColMenuOpen] = useState(false);
@@ -1529,10 +1539,14 @@ export default function DataGridPage({
       headerCellClass: "dgp-center-cell",
       renderHeaderCell: () => <div className="agh agh-index">Action</div>,
       renderCell: ({ row }) =>
-        row.status === "DisQualified" ? (
+        String(row.status || "").toLowerCase() === "disqualified" ? (
           <button
             type="button"
-            title="Delete (moves to disqualified list)"
+            title={
+              externalMode
+                ? "Permanently delete disqualified raw prospect"
+                : "Delete (moves to disqualified list)"
+            }
             aria-label="Delete prospect"
             className="inline-flex h-8 w-8 items-center justify-center rounded-md
               text-red-600 transition hover:bg-red-50 hover:text-red-700
@@ -1540,7 +1554,11 @@ export default function DataGridPage({
               dark:hover:bg-red-900/30"
             onClick={(e) => {
               e.stopPropagation();
-              deleteRowRef.current(row);
+              if (externalMode) {
+                void externalDeleteRowRef.current(row);
+              } else {
+                deleteRowRef.current(row);
+              }
             }}
           >
             <svg
@@ -1633,8 +1651,8 @@ export default function DataGridPage({
     const otherCols = dataCols.filter((c) => !c.frozen);
 
     return [
-      ...(showActions ? [actionCol] : []),
-      ...(!externalMode ? [selectCol] : []),
+      ...(showActions || showExternalActions ? [actionCol] : []),
+      ...(!externalMode || externalData?.selectable ? [selectCol] : []),
       rowNumber,
       ...stickyCols,
       ...otherCols,
@@ -1644,7 +1662,9 @@ export default function DataGridPage({
     visibleKeys,
     canEdit,
     showActions,
+    showExternalActions,
     externalMode,
+    externalData?.selectable,
     resource,
     pagination.page,
     pagination.limit,
@@ -1705,6 +1725,11 @@ export default function DataGridPage({
     selectedCache.current.clear();
     setSelectedRows(new Set());
   }, []);
+  externalDeleteRowRef.current = async (row) => {
+    const deleted = await externalData?.onDeleteRow?.(row);
+    if (deleted) clearSelection();
+    return deleted;
+  };
 
   const handleSelectedRowsChange = (next) => {
     let finalSet = next;
@@ -1765,6 +1790,29 @@ export default function DataGridPage({
     Array.from(selectedRows)
       .map((id) => selectedCache.current.get(id))
       .filter(Boolean);
+  const handleExternalDeleteSelected = async () => {
+    if (!externalData?.onDeleteSelected) return;
+    try {
+      const deleted = await externalData.onDeleteSelected(getSelectedRecords());
+      if (deleted) clearSelection();
+    } catch (deleteError) {
+      toast.error(
+        deleteError?.response?.data?.message ||
+          deleteError?.message ||
+          "Could not delete the selected raw prospects.",
+      );
+    }
+  };
+
+  const selectedDisqualifiedProspects = getSelectedRecords().filter(
+    (row) => row.status === "DisQualified",
+  );
+  const canDeleteSelectedProspects =
+    !externalMode &&
+    resource === "prospect" &&
+    canEdit &&
+    selectedRows.size > 0 &&
+    selectedDisqualifiedProspects.length === selectedRows.size;
 
   // Clear ticked rows whenever the result set changes.
   useEffect(() => {
@@ -1830,6 +1878,32 @@ export default function DataGridPage({
   };
   deleteRowRef.current = handleDeleteRow;
 
+  const handleDeleteSelectedProspects = async () => {
+    const ids = selectedDisqualifiedProspects.map((row) => row._id);
+    if (!ids.length) return;
+    let deletedCount = ids.length;
+
+    const ok = await confirm({
+      title: `Delete ${ids.length} disqualified prospect(s)?`,
+      message:
+        "The selected prospects will be moved to the disqualified list and removed from Prospects.",
+      confirmLabel: "Delete selected",
+      busyLabel: "Deleting...",
+      onConfirm: async () => {
+        const result = await dispatch(deleteDisqualified({ ids })).unwrap();
+        deletedCount = result.deleted ?? ids.length;
+        return result;
+      },
+    });
+    if (!ok) return;
+
+    clearSelection();
+    toast.success(
+      `${deletedCount} disqualified prospect(s) moved to the disqualified list.`,
+    );
+    reloadCurrentPage();
+  };
+
   const downloadJobLog = async () => {
     try {
       const blob = await exportLinkedinLogsApi({ jobId: linkedinJob.jobId });
@@ -1893,6 +1967,7 @@ export default function DataGridPage({
       }
 
       const results = Array.isArray(last?.results) ? last.results : [];
+      reloadRef.current();
       const notUpdated = results.filter(
         (r) => r.status === "skipped" || r.status === "failed",
       ).length;
@@ -2161,7 +2236,10 @@ export default function DataGridPage({
         <div className="flex flex-wrap items-center justify-end gap-3">
           {headerActions}
 
-          {!externalMode && resource === "prospect" && canEdit && (
+          {!externalMode &&
+            !hideInternalTools &&
+            resource === "prospect" &&
+            canEdit && (
             <button
               type="button"
               className="dgp-btn dgp-btn-primary"
@@ -2171,7 +2249,10 @@ export default function DataGridPage({
             </button>
           )}
 
-          {!externalMode && resource === "company" && canEdit && (
+          {!externalMode &&
+            !hideInternalTools &&
+            resource === "company" &&
+            canEdit && (
             <button
               type="button"
               onClick={() => setImportOpen(true)}
@@ -2182,6 +2263,7 @@ export default function DataGridPage({
           )}
 
           {!externalMode &&
+            !hideInternalTools &&
             (resource === "prospect" || resource === "company") && (
             <button
               type="button"
@@ -2193,6 +2275,7 @@ export default function DataGridPage({
           )}
 
           {!externalMode &&
+            !hideInternalTools &&
             resource === "prospect" &&
             canEdit &&
             selectedRows.size > 0 && (
@@ -2207,11 +2290,40 @@ export default function DataGridPage({
                 : `Update LinkedIn Profile (${selectedRows.size})`}
             </button>
           )}
+          {canDeleteSelectedProspects && (
+            <button
+              type="button"
+              className="dgp-btn dgp-btn-primary"
+              onClick={handleDeleteSelectedProspects}
+            >
+              Delete Selected ({selectedRows.size})
+            </button>
+          )}
+          {externalMode &&
+            externalData?.selectable &&
+            selectedRows.size > 0 && (
+              <>
+                <span className="dgp-muted">{selectedRows.size} selected</span>
+                <button
+                  type="button"
+                  className="dgp-btn dgp-btn-primary"
+                  onClick={handleExternalDeleteSelected}
+                  disabled={externalData.deleting}
+                >
+                  {externalData.deleting
+                    ? "Deleting..."
+                    : `Delete Selected (${selectedRows.size})`}
+                </button>
+                <button type="button" className="dgp-btn" onClick={clearSelection}>
+                  Clear selection
+                </button>
+              </>
+            )}
           {!externalMode && selectedRows.size > 0 && (
             <button
               type="button"
               className="dgp-btn"
-              onClick={() => setSelectedRows(new Set())}
+              onClick={clearSelection}
             >
               Clear selection
             </button>
@@ -2592,7 +2704,15 @@ export default function DataGridPage({
                             setVisibleKeys(fields.map((f) => f.key))
                           }
                         >
-                          Show all
+                          Select all
+                        </button>
+                        {" · "}
+                        <button
+                          type="button"
+                          className="dgp-link"
+                          onClick={() => setVisibleKeys([])}
+                        >
+                          Unselect all
                         </button>
                         {" · "}
                         <button
@@ -2715,6 +2835,13 @@ export default function DataGridPage({
                 rowKeyGetter={(row) => row._id}
                 selectedRows={selectedRows}
                 onSelectedRowsChange={handleSelectedRowsChange}
+                isRowSelectionDisabled={
+                  externalMode && externalData?.selectable
+                    ? (row) =>
+                        String(row.status || "").toLowerCase() !==
+                        "disqualified"
+                    : undefined
+                }
                 onRowsChange={onRowsChange}
                 rowHeight={42}
                 headerRowHeight={84}

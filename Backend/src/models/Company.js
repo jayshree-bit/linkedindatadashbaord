@@ -10,12 +10,12 @@ const companySchema = new mongoose.Schema(
 
     // Contact information
     emailAddress: { type: String, trim: true, lowercase: true, index: true },
-    phoneNumber: { type: String, trim: true },
+    FAX: { type: String, trim: true },
     headquarterPhone: { type: String, trim: true },
 
     // Address information
     address1: { type: String, trim: true },
-    streetAddress: { type: String, trim: true },
+    address2: { type: String, trim: true },
     city: { type: String, trim: true },
     state: { type: String, trim: true },
     zipcode: { type: String, trim: true },
@@ -43,7 +43,7 @@ const companySchema = new mongoose.Schema(
     // Revenue information
     exactRevenue: { type: String, trim: true },
     revenue: { type: String, trim: true },
-    revenueRange: { type: String, trim: true },
+    competitors: { type: String, trim: true },
     annualRevenue: { type: String, trim: true },
     revenueLink: { type: String, trim: true },
 
@@ -67,8 +67,12 @@ const companySchema = new mongoose.Schema(
     httpStatus: { type: String, trim: true },
     apolloStatus: { type: String, trim: true },
     zoominfo: { type: String, trim: true },
-    qcStatus: { type: String, trim: true },
-
+    qcStatus: {
+      type: String,
+      enum: ["Qualified", "DisQualified"],
+      trim: true,
+      default: "Qualified",
+    },
     // Company description
     description: { type: String, trim: true },
 

@@ -17,7 +17,7 @@ const fieldMap = {
   'Specific Title': 'specificTitle',
   'Job Level': 'jobLevel',
   'Job Role': 'jobRole',
-  'Phone Number': 'phoneNumber',
+  'FAX': 'FAX',
   'Address 1': 'address1',
   'Address 2': 'address2',
   City: 'city',

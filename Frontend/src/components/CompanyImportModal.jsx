@@ -118,9 +118,21 @@ export default function CompanyImportModal({ open, onClose, onDone }) {
       <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900">
         <div className="flex items-start justify-between">
           <div>
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white">Import companies</h2>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+             <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+      Import companies
+    </h2>
+
+    <div className="mt-2 inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 dark:border-emerald-800 dark:bg-emerald-950/40">
+      <span className="text-emerald-600 dark:text-emerald-400">✓</span>
+      <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+        Upload qualified company data only.
+      </p>
+    </div>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">
               Upload an .xlsx file. Companies with the same name and country are skipped as duplicates.
+            </p>
+            <p className="mt-1 text-xs text-indigo-700 dark:text-indigo-200">
+              A matching Organization ID updates the existing Company and Raw Companies data. Changed fields are shown after import.
             </p>
           </div>
           <button
@@ -132,15 +144,15 @@ export default function CompanyImportModal({ open, onClose, onDone }) {
             ×
           </button>
         </div>
-        <div className="mt-4 flex items-center justify-between rounded-lg border border-dashed border-indigo-200 bg-indigo-50/50 px-3 py-2">
-            <span className="text-xs text-slate-600">
+        <div className="mt-4 flex items-center justify-between rounded-lg border border-dashed border-indigo-200 bg-indigo-50/50 px-3 py-2 dark:border-indigo-800 dark:bg-indigo-950/30">
+            <span className="text-xs text-slate-700 dark:text-slate-200">
                 Need a template? Download the latest company fields.
             </span>
             <button
                 type="button"
                 onClick={downloadTemplate}
                 disabled={templateLoading || loading}
-                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline disabled:opacity-50"
+                className="text-xs font-semibold text-indigo-700 hover:text-indigo-900 hover:underline disabled:opacity-50 dark:text-indigo-300 dark:hover:text-indigo-200"
             >
                 {templateLoading ? 'Preparing…' : '⬇ Download template'}
             </button>
@@ -152,7 +164,7 @@ export default function CompanyImportModal({ open, onClose, onDone }) {
 
         {!result && (
           <div className="mt-4">
-            <p className="mb-1.5 text-xs font-medium text-slate-500">
+            <p className="mb-1.5 text-xs font-medium text-slate-500 dark:text-slate-300">
               Excel file (.xlsx, max 100 MB)
             </p>
             <input
@@ -198,12 +210,21 @@ export default function CompanyImportModal({ open, onClose, onDone }) {
           <div className="mt-5 space-y-4">
             <ProgressBar label="Import complete" percent={100} />
 
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {result.message && (
+              <p className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-800 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-200">
+                {result.message}
+              </p>
+            )}
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-7">
               {[
                 ['Rows in file', result.totalRows, 'text-slate-900 dark:text-white'],
                 ['Imported', result.importedCount, 'text-emerald-600'],
+                ['Companies updated', result.updatedCount, 'text-indigo-600'],
+                ['Raw rows updated', result.updatedRawCount, 'text-indigo-600'],
                 ['Duplicates', result.duplicateCount, 'text-amber-600'],
                 ['Failed / no name', (result.failedCount || 0) + (result.invalidCount || 0), 'text-rose-600'],
+                ['Disqualified', result.disqualifiedCount, 'text-rose-600'],
               ].map(([label, value, color]) => (
                 <div key={label} className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
                   <p className="text-xs text-slate-500 dark:text-slate-400">{label}</p>
@@ -211,6 +232,85 @@ export default function CompanyImportModal({ open, onClose, onDone }) {
                 </div>
               ))}
             </div>
+
+            {result.changedFields?.length > 0 && (
+              <div className="max-h-60 overflow-auto rounded-xl border border-indigo-200 dark:border-indigo-900">
+                <div className="sticky top-0 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-900 dark:bg-indigo-950 dark:text-indigo-200">
+                  Updated fields ({nf.format(result.changedFieldsTotal || result.changedFields.length)})
+                </div>
+                <div className="divide-y divide-indigo-100 dark:divide-indigo-900">
+                  {result.changedFields.map((record, index) => (
+                    <div key={`${record.organizationId}-${index}`} className="px-3 py-2 text-xs">
+                      <p className="font-semibold text-slate-800 dark:text-slate-100">
+                        Organization ID: {record.organizationId || '—'}
+                      </p>
+                      {[
+                        ['Company', record.company],
+                        ['Raw Companies', record.rawCompanies],
+                      ].map(([label, changes]) =>
+                        changes?.length ? (
+                          <div key={label} className="mt-1">
+                            <p className="font-medium text-slate-600 dark:text-slate-300">{label}</p>
+                            <ul className="ml-4 list-disc text-slate-600 dark:text-slate-300">
+                              {changes.map((change, changeIndex) => (
+                                <li key={`${change.field}-${changeIndex}`}>
+                                  {change.field}: “{change.from || 'blank'}” → “{change.to || 'blank'}”
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null,
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {result.changedFieldsTotal > result.changedFields.length && (
+                  <p className="bg-indigo-50 px-3 py-2 text-xs text-indigo-800 dark:bg-indigo-950 dark:text-indigo-200">
+                    Showing {result.changedFields.length} of {nf.format(result.changedFieldsTotal)} updated records.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {result.disqualifiedCount > 0 && (
+              <div
+                role="status"
+                className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200"
+              >
+                <p className="font-semibold">
+                  {nf.format(result.disqualifiedCount)} disqualified {result.disqualifiedCount === 1 ? 'entry was' : 'entries were'} skipped from Companies and saved to Raw Companies.
+                </p>
+                {result.disqualifiedRows?.length > 0 && (
+                  <div className="mt-3 max-h-48 overflow-auto rounded-lg border border-rose-200 dark:border-rose-900">
+                    <table className="w-full text-left text-xs">
+                      <thead className="sticky top-0 bg-rose-100 text-rose-800 dark:bg-rose-900/60 dark:text-rose-200">
+                        <tr>
+                          <th className="px-3 py-2">Company</th>
+                          <th className="px-3 py-2">QC Status</th>
+                          <th className="px-3 py-2">Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {result.disqualifiedRows.map((entry, index) => (
+                          <tr key={index} className="border-t border-rose-100 dark:border-rose-900">
+                            <td className="px-3 py-2 font-medium">
+                              {entry.name || '(unnamed company)'}
+                            </td>
+                            <td className="px-3 py-2">{entry.qcStatus}</td>
+                            <td className="px-3 py-2">{entry.reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {result.disqualifiedCount > result.disqualifiedRows.length && (
+                      <p className="px-3 py-2 text-xs">
+                        Showing {result.disqualifiedRows.length} of {nf.format(result.disqualifiedCount)} entries.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {result.duplicates?.length > 0 && (
               <div className="max-h-60 overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">

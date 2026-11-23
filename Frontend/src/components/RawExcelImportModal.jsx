@@ -106,7 +106,7 @@ export default function RawExcelImportModal({ resource, onClose, onImported }) {
               Import raw {label.toLowerCase()} data
             </h2>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              Saves rows to <code>{collectionName}</code> without mapping them to the standard schema.
+              Saves original spreadsheet rows to <code>{collectionName}</code>.
             </p>
           </div>
           <button
@@ -121,7 +121,9 @@ export default function RawExcelImportModal({ resource, onClose, onImported }) {
         </div>
 
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-          Rows are stored as ordered column/value pairs, so different spreadsheet schemas can coexist. Cell and status values are preserved without duplicate checks, status conversions, or links to the other raw collection.
+          {isProspect
+            ? 'Rows are stored as ordered column/value pairs, preserving spreadsheet cells and status without changing standard Prospect records.'
+            : 'Rows are stored as ordered column/value pairs. If an Organization ID matches, the existing Raw Companies row and matching Company record are updated with non-empty recognized fields; new Organization IDs are saved only to Raw Companies.'}
         </div>
 
         <div className="mt-4 flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm dark:bg-slate-800">
@@ -190,10 +192,45 @@ export default function RawExcelImportModal({ resource, onClose, onImported }) {
         )}
         {result && (
           <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200">
-            <p className="font-semibold">Raw import completed.</p>
+            <p className="font-semibold">{result.message || 'Raw import completed.'}</p>
             <p className="mt-1">
-              {result.importedCount.toLocaleString()} rows saved to {result.collectionName}.
+              {result.importedCount.toLocaleString()} new rows saved to {result.collectionName}.
             </p>
+            {resource === 'company' && (
+              <p className="mt-1">
+                Updated {result.updatedRawCount || 0} Raw Companies row(s) and{' '}
+                {result.updatedCompanyCount || 0} Company record(s) by Organization ID.
+              </p>
+            )}
+            {result.changedFields?.length > 0 && (
+              <details className="mt-3 rounded-lg bg-white/70 p-3 dark:bg-slate-900/40">
+                <summary className="cursor-pointer font-semibold">
+                  View changed fields ({result.changedFieldsTotal})
+                </summary>
+                <div className="mt-2 max-h-48 space-y-3 overflow-auto text-xs">
+                  {result.changedFields.map((record) => (
+                    <div key={record.organizationId}>
+                      <p className="font-semibold">
+                        Organization ID: {record.organizationId}
+                      </p>
+                      {[['Company', record.company], ['Raw Companies', record.rawCompanies]]
+                        .filter(([, changes]) => changes?.length)
+                        .map(([label, changes]) => (
+                          <div key={label} className="mt-1">
+                            <span className="font-medium">{label}:</span>{' '}
+                            {changes
+                              .map(
+                                ({ field, from, to }) =>
+                                  `${field}: ${from || '—'} → ${to || '—'}`,
+                              )
+                              .join('; ')}
+                          </div>
+                        ))}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
           </div>
         )}
 

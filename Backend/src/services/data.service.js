@@ -243,7 +243,7 @@ const buildFilter = (resource, { search = "", filters = "" } = {}) => {
         { lastName: regex },
         { companyName: regex },
         { emailAddress: regex },
-        { phoneNumber: regex },
+        { FAX: regex },
         { campaign: regex },
         { specificTitle: regex },
         { companyDomain: regex },

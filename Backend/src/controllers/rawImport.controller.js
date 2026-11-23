@@ -1,13 +1,29 @@
 import ExcelJS from "exceljs";
 import mongoose from "mongoose";
 import { randomUUID } from "crypto";
+import Company from "../models/Company.js";
+import Prospect from "../models/Prospect.js";
+import {
+  COMPANY_COLUMN_MAP,
+  normalizeCompanyHeader,
+} from "../utils/companyImportFields.js";
 
 const RAW_COLLECTIONS = {
   prospect: "raw_prospect",
   company: "raw_Company",
 };
 const INSERT_CHUNK_SIZE = 1000;
+const LOOKUP_CHUNK_SIZE = 1000;
 const JOB_TTL_MS = 30 * 60 * 1000;
+const LINKEDIN_DISQUALIFIED_IMPORT_ID = "__linkedin_disqualified_prospects__";
+const PROSPECT_RAW_FIELDS = Object.keys(Prospect.schema.paths)
+  .filter((field) => !["_id", "__v"].includes(field))
+  .map((field) => ({
+    field,
+    column: field
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase()),
+  }));
 const jobs = new Map();
 const getCollectionName = (resource) =>
   Object.prototype.hasOwnProperty.call(RAW_COLLECTIONS, resource)
@@ -32,6 +48,109 @@ const getUploader = (req) => {
 };
 
 const cellValue = (cell) => cell.value ?? null;
+const normalizeOrganizationId = (value) => String(value ?? "").trim().toLowerCase();
+const organizationIdsMatch = (left, right) => {
+  const leftKey = normalizeOrganizationId(left);
+  const rightKey = normalizeOrganizationId(right);
+  if (leftKey === rightKey) return true;
+  const leftNumber = Number(leftKey);
+  const rightNumber = Number(rightKey);
+  return (
+    Number.isSafeInteger(leftNumber) &&
+    Number.isSafeInteger(rightNumber) &&
+    leftNumber === rightNumber
+  );
+};
+const chunks = (items, size) => {
+  const result = [];
+  for (let index = 0; index < items.length; index += size) {
+    result.push(items.slice(index, index + size));
+  }
+  return result;
+};
+
+const companyValue = (value) => {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (value && typeof value === "object") {
+    if (value.hyperlink) return String(value.hyperlink).trim();
+    if (Array.isArray(value.richText)) {
+      return value.richText.map((part) => part.text || "").join("").trim();
+    }
+    if (value.text != null) return String(value.text).trim();
+    if (value.result != null) return String(value.result).trim();
+    return "";
+  }
+  return String(value ?? "").trim();
+};
+
+const getMappedCompanyFields = (rawData) => {
+  const fields = {};
+  for (const cell of rawData || []) {
+    const field = COMPANY_COLUMN_MAP[normalizeCompanyHeader(cell.column)];
+    if (!field || !Company.schema.path(field)) continue;
+    let value = companyValue(cell.value);
+    if (!value || value === "-") continue;
+    if (field === "exactEmployeeSize") value = value.replace(/,/g, "");
+    if (field === "emailAddress") value = value.replace(/^mailto:/i, "").toLowerCase();
+    fields[field] = value;
+  }
+  return fields;
+};
+
+const companyOrganizationId = (rawData) =>
+  (rawData || []).find(
+    ({ column }) =>
+      COMPANY_COLUMN_MAP[normalizeCompanyHeader(column)] === "organizationId",
+  )?.value;
+
+const rawOrganizationId = (rawData) =>
+  companyValue(companyOrganizationId(rawData));
+
+const comparableRawValue = (value) => companyValue(value);
+
+const mergeRawCompanyData = (existingRawData, incomingRawData) => {
+  const rawData = (existingRawData || []).map((cell) => ({ ...cell }));
+  const changes = [];
+
+  for (const incomingCell of incomingRawData || []) {
+    if (incomingCell.value == null || incomingCell.value === "") continue;
+    const incomingHeader = normalizeCompanyHeader(incomingCell.column);
+    const mappedField = COMPANY_COLUMN_MAP[incomingHeader];
+    const existingIndex = rawData.findIndex((cell) => {
+      const existingHeader = normalizeCompanyHeader(cell.column);
+      const existingField = COMPANY_COLUMN_MAP[existingHeader];
+      return mappedField
+        ? existingField === mappedField
+        : existingHeader === incomingHeader;
+    });
+
+    if (existingIndex < 0) {
+      rawData.push({ ...incomingCell });
+      changes.push({
+        field: incomingCell.column,
+        from: "",
+        to: comparableRawValue(incomingCell.value),
+      });
+      continue;
+    }
+
+    const currentCell = rawData[existingIndex];
+    if (
+      comparableRawValue(currentCell.value) ===
+      comparableRawValue(incomingCell.value)
+    ) {
+      continue;
+    }
+    changes.push({
+      field: currentCell.column || incomingCell.column,
+      from: comparableRawValue(currentCell.value),
+      to: comparableRawValue(incomingCell.value),
+    });
+    rawData[existingIndex] = { ...currentCell, value: incomingCell.value };
+  }
+
+  return { rawData, changes };
+};
 
 const readWorksheet = async (buffer) => {
   const workbook = new ExcelJS.Workbook();
@@ -67,11 +186,293 @@ const readWorksheet = async (buffer) => {
   return { columns, rows, worksheetName: worksheet.name };
 };
 
+const findExistingCompaniesByOrganizationId = async (organizationIds) => {
+  const values = [...new Set(organizationIds.map(companyValue).filter(Boolean))];
+  const existing = new Map();
+  for (const part of chunks(values, LOOKUP_CHUNK_SIZE)) {
+    const records = await Company.find({
+      organizationId: {
+        $in: part.map(
+          (value) => new RegExp(`^${escapeRegex(value)}$`, "i"),
+        ),
+      },
+    }).lean();
+    for (const record of records) {
+      const match = values.find((value) =>
+        organizationIdsMatch(value, record.organizationId),
+      );
+      if (match) {
+        const key = normalizeOrganizationId(match);
+        if (!existing.has(key)) existing.set(key, record);
+      }
+    }
+  }
+  return existing;
+};
+
+const findExistingRawCompaniesByOrganizationId = async (organizationIds) => {
+  const values = [...new Set(organizationIds.map(companyValue).filter(Boolean))];
+  const existing = new Map();
+  const collection = mongoose.connection.db.collection("raw_Company");
+  const queryValues = values.flatMap((value) => {
+    const numericValue = Number(value);
+    return Number.isSafeInteger(numericValue)
+      ? [new RegExp(`^${escapeRegex(value)}$`, "i"), numericValue]
+      : [new RegExp(`^${escapeRegex(value)}$`, "i")];
+  });
+  const organizationHeader = /^(organization[\s_-]*id|org[\s_-]*id)$/i;
+
+  for (const part of chunks(queryValues, LOOKUP_CHUNK_SIZE)) {
+    const records = await collection
+      .find({
+        rawData: {
+          $elemMatch: {
+            column: { $regex: organizationHeader },
+            value: { $in: part },
+          },
+        },
+      })
+      .toArray();
+    for (const record of records) {
+      const recordId = rawOrganizationId(record.rawData);
+      const match = values.find((value) =>
+        organizationIdsMatch(value, recordId),
+      );
+      if (match) {
+        const key = normalizeOrganizationId(match);
+        if (!existing.has(key)) existing.set(key, record);
+      }
+    }
+  }
+  return existing;
+};
+
+const runRawCompanyImport = async (
+  job,
+  { rows, worksheetName, fileName, uploader },
+) => {
+  const importId = randomUUID();
+  const importBatchId = randomUUID();
+  const importedAt = new Date();
+  const parsedRows = rows.map((row) => ({
+    ...row,
+    company: getMappedCompanyFields(row.rawData),
+  }));
+  const organizationIds = parsedRows
+    .map(({ company, rawData }) => company.organizationId || rawOrganizationId(rawData))
+    .filter(Boolean);
+
+  updateJob(job, {
+    stage: "Matching Organization IDs",
+    percent: 15,
+    processed: 0,
+    totalRows: rows.length,
+  });
+
+  const [existingCompanies, existingRawCompanies] = await Promise.all([
+    findExistingCompaniesByOrganizationId(organizationIds),
+    findExistingRawCompaniesByOrganizationId(organizationIds),
+  ]);
+  const rawUpdates = new Map();
+  const companyUpdates = new Map();
+  const newRows = [];
+  const newRowsByOrganizationId = new Map();
+  const changedByOrganizationId = new Map();
+
+  for (const [index, entry] of parsedRows.entries()) {
+    const organizationId =
+      entry.company.organizationId || rawOrganizationId(entry.rawData);
+    const organizationKey = normalizeOrganizationId(organizationId);
+    const existingRaw = organizationKey
+      ? existingRawCompanies.get(organizationKey)
+      : null;
+
+    if (existingRaw) {
+      const id = String(existingRaw._id);
+      const current = rawUpdates.get(id);
+      const merged = mergeRawCompanyData(
+        current?.rawData || existingRaw.rawData,
+        entry.rawData,
+      );
+      rawUpdates.set(id, {
+        id: existingRaw._id,
+        rawData: merged.rawData,
+        metadata: {
+          importId,
+          resource: "company",
+          sourceFile: fileName,
+          worksheet: worksheetName,
+          rowNumber: entry.rowNumber,
+          uploadedBy: uploader.id,
+          uploadedByName: uploader.name,
+          importedAt,
+        },
+      });
+      if (merged.changes.length) {
+        const changes = changedByOrganizationId.get(organizationKey) || {
+          organizationId,
+          company: [],
+          rawCompanies: [],
+        };
+        changes.rawCompanies.push(...merged.changes);
+        changedByOrganizationId.set(organizationKey, changes);
+      }
+    } else if (organizationKey && newRowsByOrganizationId.has(organizationKey)) {
+      const current = newRowsByOrganizationId.get(organizationKey);
+      const merged = mergeRawCompanyData(current.rawData, entry.rawData);
+      current.rawData = merged.rawData;
+      current._rawImport.rowNumber = entry.rowNumber;
+      if (merged.changes.length) {
+        const changes = changedByOrganizationId.get(organizationKey) || {
+          organizationId,
+          company: [],
+          rawCompanies: [],
+        };
+        changes.rawCompanies.push(...merged.changes);
+        changedByOrganizationId.set(organizationKey, changes);
+      }
+    } else {
+      const document = {
+        rawData: entry.rawData,
+        _rawImport: {
+          importId,
+          resource: "company",
+          sourceFile: fileName,
+          worksheet: worksheetName,
+          rowNumber: entry.rowNumber,
+          uploadedBy: uploader.id,
+          uploadedByName: uploader.name,
+          importedAt,
+        },
+      };
+      newRows.push(document);
+      if (organizationKey) newRowsByOrganizationId.set(organizationKey, document);
+    }
+
+    if (organizationKey && existingCompanies.has(organizationKey)) {
+      const existing = existingCompanies.get(organizationKey);
+      const id = String(existing._id);
+      const pending = companyUpdates.get(id) || {
+        id: existing._id,
+        existing,
+        fields: {},
+        changes: [],
+        hasChanges: false,
+      };
+      for (const [field, value] of Object.entries(entry.company)) {
+        if (!value) continue;
+        const previous =
+          pending.fields[field] !== undefined
+            ? pending.fields[field]
+            : existing[field];
+        if (String(previous ?? "").trim() !== String(value).trim()) {
+          pending.changes.push({
+            field,
+            from: String(previous ?? "").trim(),
+            to: String(value).trim(),
+          });
+        }
+        pending.fields[field] = value;
+      }
+      if (pending.fields.name) {
+        pending.fields.nameKey = pending.fields.name.trim().toLowerCase();
+      }
+      pending.fields.uploadedBy = uploader.id;
+      pending.fields.uploadedByName = uploader.name;
+      pending.fields.importBatchId = importBatchId;
+      companyUpdates.set(id, pending);
+      if (pending.changes.length) {
+        pending.hasChanges = true;
+        const changes = changedByOrganizationId.get(organizationKey) || {
+          organizationId,
+          company: [],
+          rawCompanies: [],
+        };
+        changes.company.push(...pending.changes);
+        changedByOrganizationId.set(organizationKey, changes);
+        pending.changes = [];
+      }
+    }
+
+    updateJob(job, {
+      processed: index + 1,
+      percent: Math.min(75, 15 + Math.floor(((index + 1) / rows.length) * 60)),
+    });
+  }
+
+  const collection = mongoose.connection.db.collection("raw_Company");
+  const rawUpdateOperations = [...rawUpdates.values()].map(
+    ({ id, rawData, metadata }) => ({
+      updateOne: {
+        filter: { _id: id },
+        update: { $set: { rawData, _rawImport: metadata } },
+      },
+    }),
+  );
+  const companyUpdateOperations = [...companyUpdates.values()]
+    .filter(({ hasChanges }) => hasChanges)
+    .map(({ id, fields }) => ({
+      updateOne: {
+        filter: { _id: id },
+        update: { $set: fields },
+      },
+    }));
+
+  updateJob(job, { stage: "Updating matching companies", percent: 80 });
+  for (const part of chunks(rawUpdateOperations, INSERT_CHUNK_SIZE)) {
+    await collection.bulkWrite(part, { ordered: true });
+  }
+  for (const part of chunks(companyUpdateOperations, INSERT_CHUNK_SIZE)) {
+    await Company.bulkWrite(part, { ordered: true });
+  }
+
+  updateJob(job, { stage: "Saving new raw company rows", percent: 90 });
+  let insertedCount = 0;
+  for (const part of chunks(newRows, INSERT_CHUNK_SIZE)) {
+    if (!part.length) continue;
+    const result = await collection.insertMany(part, { ordered: true });
+    insertedCount += result.insertedCount;
+  }
+
+  const changedFields = [...changedByOrganizationId.values()].slice(0, 500);
+  const updatedCompanyCount = companyUpdateOperations.length;
+  const updatedRawCount = rawUpdateOperations.length;
+  updateJob(job, {
+    state: "done",
+    stage: "Completed",
+    percent: 100,
+    processed: rows.length,
+    importedCount: insertedCount,
+    result: {
+      collectionName: "raw_Company",
+      importId,
+      importBatchId,
+      totalRows: rows.length,
+      importedCount: insertedCount,
+      updatedRawCount,
+      updatedCompanyCount,
+      changedFields,
+      changedFieldsTotal: changedByOrganizationId.size,
+      message: `Raw company import completed: ${insertedCount} new raw row(s), ${updatedRawCount} existing Raw Companies row(s) updated, and ${updatedCompanyCount} Company record(s) updated by Organization ID.`,
+    },
+  });
+};
+
 const runRawImport = async (job, { buffer, fileName, collectionName, uploader }) => {
   updateJob(job, { stage: "Reading worksheet", percent: 5 });
 
   const { rows, worksheetName } = await readWorksheet(buffer);
   if (!rows.length) throw new Error("The first worksheet contains no data rows.");
+
+  if (job.resource === "company") {
+    await runRawCompanyImport(job, {
+      rows,
+      worksheetName,
+      fileName,
+      uploader,
+    });
+    return;
+  }
 
   const collection = mongoose.connection.db.collection(collectionName);
   const importedAt = new Date();
@@ -210,6 +611,7 @@ export const getRawImports = async (req, res, next) => {
     const imports = await mongoose.connection.db
       .collection(collectionName)
       .aggregate([
+        { $match: { "_rawImport.resource": req.params.resource } },
         {
           $group: {
             _id: "$_rawImport.importId",
@@ -241,6 +643,31 @@ export const getRawImports = async (req, res, next) => {
         },
       ])
       .toArray();
+
+    if (req.params.resource === "prospect") {
+      const [totalRows, latest] = await Promise.all([
+        Prospect.countDocuments({ status: "DisQualified" }),
+        Prospect.findOne({ status: "DisQualified" })
+          .sort({ updatedAt: -1 })
+          .select("updatedAt uploadedByName employeeName")
+          .lean(),
+      ]);
+      if (latest) {
+        imports.push({
+          importId: LINKEDIN_DISQUALIFIED_IMPORT_ID,
+          fileName: "LinkedIn Disqualified Prospects",
+          importedAt: latest.updatedAt,
+          uploadedByName: latest.uploadedByName || latest.employeeName || "",
+          totalRows,
+          columns: PROSPECT_RAW_FIELDS.map(({ column }) => column),
+        });
+        imports.sort(
+          (left, right) =>
+            new Date(right.importedAt || 0).getTime() -
+            new Date(left.importedAt || 0).getTime(),
+        );
+      }
+    }
 
     return res.json({ imports });
   } catch (error) {
@@ -362,8 +789,11 @@ const buildRawFilter = (filters) => {
   return clauses.length ? { $and: clauses } : {};
 };
 
-const rawSearchFilter = (importId, search) => {
-  const filter = { "_rawImport.importId": importId };
+const rawSearchFilter = (importId, search, resource) => {
+  const filter = {
+    "_rawImport.importId": importId,
+    "_rawImport.resource": resource,
+  };
   if (search) {
     filter["rawData.value"] = { $regex: escapeRegex(search), $options: "i" };
   }
@@ -401,22 +831,32 @@ export const getRawRows = async (req, res, next) => {
       return res.status(400).json({ message: "Invalid raw data filters." });
     }
     const filter = {
-      ...rawSearchFilter(importId, search),
+      ...rawSearchFilter(importId, search, req.params.resource),
       ...buildRawFilter(filters),
     };
     const collection = mongoose.connection.db.collection(collectionName);
     const total = await collection.countDocuments(filter);
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const page = Math.min(requestedPage, totalPages);
+    const projection = {
+      rawData: 1,
+      "_rawImport.rowNumber": 1,
+    };
+    if (req.params.resource === "prospect") {
+      for (const { field } of PROSPECT_RAW_FIELDS) projection[field] = 1;
+    }
     const [rows, sample] = await Promise.all([
       collection
-        .find(filter, { projection: { rawData: 1, "_rawImport.rowNumber": 1 } })
+        .find(filter, { projection })
         .sort(getRawSort(req.query.sortBy, req.query.sortOrder))
         .skip((page - 1) * limit)
         .limit(limit)
         .toArray(),
       collection.findOne(
-        { "_rawImport.importId": importId },
+        {
+          "_rawImport.importId": importId,
+          "_rawImport.resource": req.params.resource,
+        },
         {
           projection: { rawData: 1, "_rawImport.sourceFile": 1, "_rawImport.importedAt": 1, "_rawImport.uploadedByName": 1 },
           sort: { "_rawImport.rowNumber": 1 },
@@ -437,6 +877,12 @@ export const getRawRows = async (req, res, next) => {
         columns: (sample.rawData || []).map((cell) => cell.column),
       },
       rows: rows.map((row) => ({
+        ...Object.fromEntries(
+          PROSPECT_RAW_FIELDS
+            .filter(({ field }) => row[field] !== undefined)
+            .map(({ field }) => [field, row[field]]),
+        ),
+        _id: String(row._id),
         id: String(row._id),
         rowNumber: row._rawImport.rowNumber,
         rawData: row.rawData || [],
@@ -493,12 +939,15 @@ export const exportRawExcel = async (req, res, next) => {
 
     const search = String(req.query.search || "").trim().slice(0, 200);
     const filter = {
-      ...rawSearchFilter(importId, search),
+      ...rawSearchFilter(importId, search, req.params.resource),
       ...buildRawFilter(filters),
     };
     const collection = mongoose.connection.db.collection(collectionName);
     const sample = await collection.findOne(
-      { "_rawImport.importId": importId },
+      {
+        "_rawImport.importId": importId,
+        "_rawImport.resource": req.params.resource,
+      },
       { projection: { rawData: 1 }, sort: { "_rawImport.rowNumber": 1 } },
     );
     if (!sample) {
@@ -604,7 +1053,7 @@ export const getRawDistinctValues = async (req, res, next) => {
     const valueSearch = String(req.query.valueSearch || "").trim().slice(0, 200).toLowerCase();
     const limit = Math.min(500, Math.max(1, Number.parseInt(req.query.limit, 10) || 200));
     const filter = {
-      ...rawSearchFilter(importId, search),
+      ...rawSearchFilter(importId, search, req.params.resource),
       ...buildRawFilter(filters),
     };
     const columnIndex = Number(field[1]);

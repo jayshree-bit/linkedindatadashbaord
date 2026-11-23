@@ -26,7 +26,7 @@ const PROSPECT_COLUMN_MAP = {
   "specific title": "specificTitle",
   "job level": "jobLevel",
   "job role": "jobRole",
-  "phone number": "phoneNumber",
+  "FAX": "FAX",
 
   "address 1": "address1",
   "address 2": "address2",
@@ -79,7 +79,7 @@ const LIST_LIMIT = 200;
 const loggedLinkedinJobs = new Set();
 export const getProspectDashboardStats = async (req, res, next) => {
   try {
-    const employeeName = String(req.query.employeeName || '').trim();
+    const employeeName = String(req.query.uploadedByName || '').trim();
     const includeLists = req.query.includeLists === 'true';
 
     // One aggregation: group by employeeName (case-insensitive). Blank names are
@@ -87,8 +87,8 @@ export const getProspectDashboardStats = async (req, res, next) => {
     const rows = await Prospect.aggregate([
       {
         $group: {
-          _id: { $toLower: { $trim: { input: { $ifNull: ['$employeeName', ''] } } } },
-          label: { $first: '$employeeName' },
+          _id: { $toLower: { $trim: { input: { $ifNull: ['$uploadedByName', ''] } } } },
+          label: { $first: '$uploadedByName' },
           total: { $sum: 1 },
           qualified: { $sum: { $cond: [{ $eq: ['$status', 'Qualified'] }, 1, 0] } },
           disqualified: { $sum: { $cond: [{ $eq: ['$status', 'DisQualified'] }, 1, 0] } },
@@ -476,6 +476,7 @@ export const exportFile = (req, res) => {
 const ALLOWED_STATUSES = ["Qualified", "DisQualified"];
 const INSERT_CHUNK = 1000;
 const LOOKUP_CHUNK = 5000;
+const RAW_PROSPECT_COLLECTION = "raw_prospect";
 const importJobs = new Map();
 const JOB_TTL_MS = 30 * 60 * 1000;
 const updateJob = (job, patch) =>
@@ -561,16 +562,17 @@ async function parseProspectsFromBuffer(buffer) {
   await workbook.xlsx.load(buffer);
 
   const sheet = workbook.worksheets[0];
-  if (!sheet) return [];
+  if (!sheet) return { rows: [], worksheetName: "" };
 
   // Header row -> { colNumber: fieldName }
   const colToField = {};
+  const headersByColumn = {};
   sheet.getRow(1).eachCell({ includeEmpty: false }, (cell, colNumber) => {
-    const field = PROSPECT_COLUMN_MAP[normalizeHeader(getExcelValue(cell))];
+    const header = String(getExcelValue(cell) ?? "").trim();
+    const field = PROSPECT_COLUMN_MAP[normalizeHeader(header)];
     if (field) colToField[colNumber] = field;
+    if (header) headersByColumn[colNumber] = header;
   });
-
-  if (!Object.keys(colToField).length) return [];
 
   const prospects = [];
 
@@ -578,6 +580,12 @@ async function parseProspectsFromBuffer(buffer) {
     if (rowNumber === 1) return;
 
     const prospect = {};
+    const rawData = Object.entries(headersByColumn).map(
+      ([columnNumber, column]) => ({
+        column,
+        value: row.getCell(Number(columnNumber)).value ?? null,
+      }),
+    );
     let hasData = false;
 
     for (const [colNumber, field] of Object.entries(colToField)) {
@@ -592,10 +600,86 @@ async function parseProspectsFromBuffer(buffer) {
       }
     }
 
-    if (hasData) prospects.push(prospect);
+    if (rawData.some(({ value }) => value !== null && value !== "")) {
+      prospects.push({
+        prospect,
+        rawData,
+        rowNumber,
+        hasMappedData: hasData,
+      });
+    }
   });
 
-  return prospects;
+  return { rows: prospects, worksheetName: sheet.name };
+}
+
+async function saveDisqualifiedProspectsToRaw(
+  entries,
+  { importId, importBatchId, fileName, worksheetName, uploader, onChunk },
+) {
+  const collection = mongoose.connection.db.collection(RAW_PROSPECT_COLLECTION);
+  const importedAt = new Date();
+  const documents = entries.map(
+    ({ prospect, rawData: sourceData, rowNumber }) => {
+      const rawData = sourceData.map((cell) => ({ ...cell }));
+      const prospectData = Object.fromEntries(
+        Object.entries(Prospect.schema.paths)
+          .filter(([field]) => !["_id", "__v"].includes(field))
+          .map(([field, schemaPath]) => {
+            if (prospect[field] !== undefined) return [field, prospect[field]];
+            const defaultValue = schemaPath.defaultValue;
+            return [
+              field,
+              defaultValue === undefined
+                ? null
+                : typeof defaultValue === "function"
+                  ? defaultValue()
+                  : defaultValue,
+            ];
+          }),
+      );
+      const statusCell = rawData.find(
+        ({ column }) => normalizeHeader(column) === "status",
+      );
+      if (statusCell) statusCell.value = "DisQualified";
+      else rawData.push({ column: "Status", value: "DisQualified" });
+      prospectData.status = "DisQualified";
+      prospectData.importBatchId = importBatchId;
+      prospectData.createdAt = importedAt;
+      prospectData.updatedAt = importedAt;
+
+      return {
+        ...prospectData,
+        __v: 0,
+        rawData,
+        _rawImport: {
+          importId,
+          resource: "prospect",
+          sourceFile: fileName,
+          worksheet: worksheetName,
+          rowNumber,
+          uploadedBy: String(uploader.id),
+          uploadedByName: uploader.name,
+          importedAt,
+        },
+      };
+    },
+  );
+  let processed = 0;
+
+  for (const part of chunk(documents, INSERT_CHUNK)) {
+    try {
+      const result = await collection.insertMany(part, { ordered: true });
+      processed += result.insertedCount;
+    } catch (error) {
+      throw new Error(
+        `Could not save DisQualified rows to ${RAW_PROSPECT_COLLECTION} starting at row ${processed + 2}: ${error.message}`,
+      );
+    }
+    onChunk?.(processed);
+  }
+
+  return processed;
 }
 const NO_UPDATE = new Set([
   "employeeName", "employeeCode", "status",
@@ -713,7 +797,7 @@ const getUploader = (req) => {
 
 async function runImportJob(
   job,
-  { buffer, selectedStatus, uploader, io }
+  { buffer, fileName, selectedStatus, uploader, io }
 ) {
   try {
     updateJob(job, {
@@ -723,8 +807,13 @@ async function runImportJob(
       total: null,
     });
 
-    const parsed = await parseProspectsFromBuffer(buffer);
-    if (!parsed.length) {
+    const { rows: parsedRows, worksheetName } =
+      await parseProspectsFromBuffer(buffer);
+    const importEntries =
+      selectedStatus === "DisQualified"
+        ? parsedRows
+        : parsedRows.filter((entry) => entry.hasMappedData);
+    if (!importEntries.length) {
       return updateJob(job, {
         state: "failed",
         error: "No valid rows or recognised column headers found in the file.",
@@ -733,7 +822,7 @@ async function runImportJob(
 
     const importBatchId = randomUUID();
 
-    const rows = parsed.map((p) => ({
+    const rows = importEntries.map(({ prospect: p }) => ({
       ...p,
       employeeName: p.employeeName || uploader.name,
       employeeCode: p.employeeCode || uploader.code,
@@ -757,44 +846,59 @@ async function runImportJob(
 
     /* ---------- DisQualified: no duplicate check ---------- */
     if (selectedStatus === "DisQualified") {
+      const rawImportId = randomUUID();
       updateJob(job, {
-        stage: "Saving rows",
+        stage: "Saving DisQualified rows to Raw Prospects",
         processed: 0,
         total: rows.length,
       });
 
-      const { inserted, errors } = await insertInChunks(rows, (done) =>
-        updateJob(job, {
-          processed: done,
-          percent: scale(10, 99, done, rows.length),
-        }),
+      const savedCount = await saveDisqualifiedProspectsToRaw(
+        importEntries.map((entry, index) => ({
+          ...entry,
+          prospect: rows[index],
+        })),
+        {
+          importId: rawImportId,
+          importBatchId,
+          fileName,
+          worksheetName,
+          uploader,
+          onChunk: (done) =>
+            updateJob(job, {
+              processed: done,
+              percent: scale(10, 99, done, rows.length),
+            }),
+        },
       );
 
       updateJob(job, {
-  state: 'done',
-  percent: 100,
-  processed: rows.length,
-  result: {
-    message: 'DisQualified Excel import completed.',
-    ...summary,
-    importedCount: inserted,
-    failedCount: rows.length - inserted,
-    duplicateCheckPerformed: false,
-    ...(errors.length && { errors: errors.slice(0, 5) }),
-  },
-});
+        state: "done",
+        percent: 100,
+        processed: rows.length,
+        result: {
+          message: `${savedCount} DisQualified entries were saved to Raw Prospects and will not appear in All Prospects.`,
+          ...summary,
+          importedCount: 0,
+          rawSavedCount: savedCount,
+          rawCollectionName: RAW_PROSPECT_COLLECTION,
+          rawImportId,
+          failedCount: rows.length - savedCount,
+          duplicateCheckPerformed: false,
+        },
+      });
 
-await emitImportCompleted(io, {
-  type: 'prospect',
-  uploaderName: uploader.name || 'Unknown user',
-  totalImported: inserted,
-  qualifiedCount: 0,
-  disqualifiedCount: inserted,
-  status: 'success',
-  message: `${uploader.name || 'A user'} imported ${inserted} DisQualified prospects`,
-});
+      await emitImportCompleted(io, {
+        type: "prospect",
+        uploaderName: uploader.name || "Unknown user",
+        totalImported: 0,
+        qualifiedCount: 0,
+        disqualifiedCount: savedCount,
+        status: "success",
+        message: `${uploader.name || "A user"} saved ${savedCount} DisQualified prospects to Raw Prospects`,
+      });
 
-return job;
+      return job;
     }
 
     /* ---------- Qualified: skip duplicates ---------- */
@@ -826,7 +930,7 @@ return job;
     let unchangedCount = 0;
 
     rows.forEach((row, i) => {
-      const src = parsed[i]; // original Excel values (no injected defaults)
+      const src = importEntries[i].prospect; // original Excel values (no injected defaults)
       const email = row.emailAddress;
       const linkedin = row.linkedinProfileLink;
 
@@ -1026,6 +1130,7 @@ export async function importProspectsExcel(req, res, next) {
 
 runImportJob(job, {
   buffer: req.file.buffer,
+  fileName: req.file.originalname,
   selectedStatus,
   uploader,
   io,
@@ -1211,10 +1316,30 @@ export const linkedinUpdateStatus = async (req, res, next) => {
 
     const finished = ["done", "stopped", "failed"].includes(data?.state);
     if (r.ok && finished && !loggedLinkedinJobs.has(jobId)) {
+      const results = Array.isArray(data.results) ? data.results : [];
+      const disqualifiedIds = [
+        ...new Set(
+          results
+            .filter((result) => result.status === "disqualified")
+            .map((result) => String(result.id || ""))
+            .filter((id) => mongoose.isValidObjectId(id)),
+        ),
+      ].map((id) => new mongoose.Types.ObjectId(id));
+      if (disqualifiedIds.length) {
+        await Prospect.updateMany(
+          { _id: { $in: disqualifiedIds } },
+          {
+            $set: {
+              status: "DisQualified",
+              updatedAt: new Date(),
+            },
+          },
+        );
+      }
+
       loggedLinkedinJobs.add(jobId);
       setTimeout(() => loggedLinkedinJobs.delete(jobId), 60 * 60 * 1000).unref?.();
 
-      const results = Array.isArray(data.results) ? data.results : [];
       const count = (s) => results.filter((x) => x.status === s).length;
       const skipped = count("skipped");
       const failed = count("failed");
@@ -1332,13 +1457,65 @@ export const exportLinkedinLogs = async (req, res, next) => {
 
 export const deleteProspects = async (req, res, next) => {
   try {
-  
     const ids = Array.isArray(req.body.ids) ? req.body.ids : [];
     if (!ids.length) {
       return res.status(400).json({ message: 'No records selected.' });
     }
 
     const uploader = getUploader(req);
+    if (req.body.source === 'raw') {
+      const uniqueIds = [...new Set(ids.map((id) => String(id || '').trim()))];
+      if (uniqueIds.length > 1000) {
+        return res.status(400).json({ message: 'Max 1000 records per delete.' });
+      }
+
+      const validIds = uniqueIds
+        .filter((id) => mongoose.isValidObjectId(id))
+        .map((id) => new mongoose.Types.ObjectId(id));
+      const invalidCount = uniqueIds.length - validIds.length;
+      if (!validIds.length) {
+        return res.status(400).json({
+          message: 'No valid raw prospect IDs were provided.',
+          deleted: 0,
+          invalidCount,
+        });
+      }
+
+      const result = await mongoose.connection.db
+        .collection('raw_prospect')
+        .deleteMany({
+          _id: { $in: validIds },
+          rawData: {
+            $elemMatch: {
+              column: { $regex: /^status$/i },
+              value: { $regex: /^disqualified$/i },
+            },
+          },
+        });
+      const deleted = result.deletedCount || 0;
+      const skipped = uniqueIds.length - deleted - invalidCount;
+
+      void logUserActivity(req, {
+        action: 'PROSPECT_DELETED',
+        description: `Permanently deleted ${deleted} DisQualified raw prospect(s); ${skipped} skipped`,
+        resource: 'prospect',
+        metadata: {
+          deleted,
+          skipped,
+          invalidCount,
+          requested: ids.length,
+          source: 'raw_prospect',
+        },
+      });
+
+      return res.json({
+        success: true,
+        deleted,
+        skipped,
+        invalidCount,
+      });
+    }
+
     const result = await svc.removeDisqualifiedProspects(ids, {
       id: uploader.id,
       name: uploader.name,

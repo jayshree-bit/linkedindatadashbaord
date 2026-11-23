@@ -793,7 +793,7 @@ export default function Dashboard() {
         </ChartCard>
         <div className="grid grid-cols-1 gap-6 xl:col-span-3 xl:grid-cols-2">
           <ChartCard
-            title="Prospects by job level"
+            title="Prospects by Job Level"
             subtitle="Top job levels"
             loading={showSkeleton}
             empty={!showSkeleton && !jobLevelData.length}
@@ -801,7 +801,7 @@ export default function Dashboard() {
             <HBar data={jobLevelData} color="multi" />
           </ChartCard>
           <ChartCard
-            title="Prospects by job role"
+            title="Prospects by Job Function"
             subtitle="Top job roles"
             loading={showSkeleton}
             empty={!showSkeleton && !jobRoleData.length}

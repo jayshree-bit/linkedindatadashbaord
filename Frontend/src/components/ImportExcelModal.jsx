@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Link } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { importProspects, resetImport } from '../features/dataSlice';
 
@@ -141,9 +142,15 @@ const TEMPLATE_URL = '/templates/Sample_Import_Template.xlsx';
             >
               <option value="">Select status…</option>
               <option value="Qualified">Qualified (existing records are updated, And New Records are Inserted)</option>
-              <option value="DisQualified">DisQualified (no duplicate check)</option>
+              <option value="DisQualified">DisQualified (saved to Raw Prospects)</option>
             </select>
           </label>
+
+          {status === 'DisQualified' && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              DisQualified rows are stored in Raw Prospects and are not added to All Prospects.
+            </p>
+          )}
 
           <label className="grid gap-1.5">
             <span className="text-xs font-medium text-slate-500">
@@ -199,7 +206,20 @@ const TEMPLATE_URL = '/templates/Sample_Import_Template.xlsx';
             <ul className="mt-1.5 list-disc space-y-0.5 pl-5">
                 <li>Status: {result.selectedStatus}</li>
                 <li>Rows in file: {result.totalRows}</li>
-                <li>New imported: {result.importedCount}</li>
+                <li>
+                  {result.rawImportId ? 'Saved to Raw Prospects' : 'New imported'}:{' '}
+                  {result.rawSavedCount ?? result.importedCount}
+                </li>
+                {result.rawImportId && (
+                  <li>
+                    <Link
+                      to={`/prospects/raw?importId=${encodeURIComponent(result.rawImportId)}`}
+                      className="font-semibold text-indigo-700 underline hover:text-indigo-900"
+                    >
+                      View these rows in Raw Prospects
+                    </Link>
+                  </li>
+                )}
                 {result.duplicateCheckPerformed && (
                   <>
                     <li>Existing updated: {result.updatedCount ?? 0}</li>

@@ -1323,6 +1323,22 @@ body.dark .dgp {
   color: #0f9f92;
   transition: background .15s, color .15s;
 }
-.dgp-social a:hover { background: #0f9f92; color: #fff; }
-.dark .dgp-social a { border-color: #374151; color: #5eead4; }
-.dark .dgp-ci-avatar--logo { border-color: #374151; }
+.dgp-social a:hover { background: #ffffff00; color: #fff; }
+:is(.dark, [data-theme="dark"], [data-bs-theme="dark"]) .dgp-social a {
+  border-color: #475569;
+  background-color: rgba(15, 23, 42, .35);
+}
+:is(.dark, [data-theme="dark"], [data-bs-theme="dark"]) .dgp-social a:hover {
+  border-color: #0f9f92;
+  background-color: #0f766e;
+}
+:is(.dark, [data-theme="dark"], [data-bs-theme="dark"]) .dgp-social-twitterUrl svg,
+:is(.dark, [data-theme="dark"], [data-bs-theme="dark"]) .dgp-social-tiktokUrl svg {
+  stroke: #e2e8f0;
+}
+:is(.dark, [data-theme="dark"], [data-bs-theme="dark"]) .dgp-social-website svg {
+  stroke: #cbd5e1;
+}
+:is(.dark, [data-theme="dark"], [data-bs-theme="dark"]) .dgp-ci-avatar--logo {
+  border-color: #374151;
+}
