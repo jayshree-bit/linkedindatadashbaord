@@ -30,6 +30,7 @@ import {
   updateLinkedinProfilesApi,
   getLinkedinUpdateStatusApi,
   exportLinkedinLogsApi,
+  getDomainHistoryApi,
 } from "../services/dataService";
 import "./DataGridPage.css";
 import ImportExcelModal from "./ImportExcelModal";
@@ -1029,14 +1030,61 @@ function RecordCard({
   );
 }
 
-function RecordModal({ row, cfg, fields, onClose }) {
+function RecordModal({ row, cfg, fields, resource, onClose }) {
   const [showEmpty, setShowEmpty] = useState(false);
+  const [activeTab, setActiveTab] = useState("details");
+  const [domainHistory, setDomainHistory] = useState([]);
+  const [domainHistoryStatus, setDomainHistoryStatus] = useState("idle");
+  const [domainHistoryError, setDomainHistoryError] = useState("");
+
+  const domain = useMemo(() => {
+    const rawDomain = String(row?.domain ?? "").trim();
+    if (!rawDomain) return "";
+
+    try {
+      return new URL(
+        rawDomain.includes("://") ? rawDomain : `https://${rawDomain}`,
+      ).hostname.replace(/^www\./i, "");
+    } catch {
+      return rawDomain.split(/[/?#]/)[0].replace(/^www\./i, "");
+    }
+  }, [row?.domain]);
+  const hasDomainHistory = resource === "company" && Boolean(domain);
 
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  useEffect(() => {
+    if (!hasDomainHistory) return undefined;
+
+    let cancelled = false;
+    setDomainHistoryStatus("loading");
+    setDomainHistoryError("");
+    setDomainHistory([]);
+
+    getDomainHistoryApi(domain)
+      .then((response) => {
+        if (cancelled) return;
+        setDomainHistory(Array.isArray(response?.rows) ? response.rows : []);
+        setDomainHistoryStatus("loaded");
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setDomainHistoryError(
+          error?.response?.data?.message ||
+            error?.message ||
+            "Could not load domain history.",
+        );
+        setDomainHistoryStatus("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [domain, hasDomainHistory]);
 
   if (!row) return null;
 
@@ -1098,42 +1146,130 @@ function RecordModal({ row, cfg, fields, onClose }) {
           </button>
         </header>
 
+        {hasDomainHistory && (
+          <nav className="dgp-modal-tabs" aria-label="Company details sections">
+            <button
+              type="button"
+              className={activeTab === "details" ? "on" : ""}
+              aria-current={activeTab === "details" ? "page" : undefined}
+              onClick={() => setActiveTab("details")}
+            >
+              Company Details
+            </button>
+            <button
+              type="button"
+              className={activeTab === "history" ? "on" : ""}
+              aria-current={activeTab === "history" ? "page" : undefined}
+              onClick={() => setActiveTab("history")}
+            >
+              Domain History
+            </button>
+          </nav>
+        )}
+
         <div className="dgp-modal-tools">
-          <label>
-            <input
-              type="checkbox"
-              checked={showEmpty}
-              onChange={(e) => setShowEmpty(e.target.checked)}
-            />{" "}
-            Show empty fields
-          </label>
-          <span className="dgp-muted">{visible.length} fields</span>
+          {activeTab === "details" ? (
+            <>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={showEmpty}
+                  onChange={(e) => setShowEmpty(e.target.checked)}
+                />{" "}
+                Show empty fields
+              </label>
+              <span className="dgp-muted">{visible.length} fields</span>
+            </>
+          ) : (
+            <>
+              <span>History for {domain}</span>
+              <span className="dgp-muted">{domainHistory.length} records</span>
+            </>
+          )}
         </div>
 
         <div className="dgp-modal-body">
-          {visible.length === 0 && (
-            <div className="dgp-muted">No additional details.</div>
+          {activeTab === "details" ? (
+            <>
+              {visible.length === 0 && (
+                <div className="dgp-muted">No additional details.</div>
+              )}
+              {visible.map((f) => {
+                const render = renderFor(f.key, f);
+                const value = row[f.key];
+                return (
+                  <div key={f.key} className="dgp-md-row">
+                    <dt>{f.name}</dt>
+                    <dd>
+                      {isBlankValue(value) ? (
+                        <span className="dgp-ci-empty">—</span>
+                      ) : render ? (
+                        render({ row })
+                      ) : Array.isArray(value) ? (
+                        value.join(", ")
+                      ) : (
+                        String(value)
+                      )}
+                    </dd>
+                  </div>
+                );
+              })}
+            </>
+          ) : domainHistoryStatus === "loading" ? (
+            <div className="dgp-domain-history-message" role="status">
+              Loading domain history…
+            </div>
+          ) : domainHistoryStatus === "error" ? (
+            <div className="dgp-domain-history-message" role="alert">
+              Could not load domain history: {domainHistoryError}
+            </div>
+          ) : domainHistory.length === 0 ? (
+            <div className="dgp-domain-history-message">
+              No domain history found for {domain}.
+            </div>
+          ) : (
+           <div className="dgp-domain-history-details">
+  {domainHistory.map((record, index) => (
+    <div
+      key={record.id || `${record.domain}-${record.report_month}-${index}`}
+      className="dgp-domain-history-card"
+    >
+      <div className="dgp-domain-history-card-header">
+        <h3>{record.domain || "—"}</h3>
+    
+      </div>
+
+      <div className="dgp-domain-history-fields">
+        {[
+          { key: "report_month", name: "Report Month" },
+          { key: "total_visits", name: "Total Visits" },
+          { key: "bounce_rate", name: "Bounce Rate" },
+          { key: "global_rank", name: "Global Rank" },
+          { key: "domain_age", name: "Domain Age" },
+          { key: "scraped_at", name: "Scraped At" },
+        ].map((f) => {
+          const value = record[f.key];
+
+          return (
+            <div key={f.key} className="dgp-md-row">
+              <dt>{f.name}</dt>
+              <dd>
+                {isBlankValue(value) ? (
+                  <span className="dgp-ci-empty">—</span>
+                ) : Array.isArray(value) ? (
+                  value.join(", ")
+                ) : (
+                  String(value)
+                )}
+              </dd>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  ))}
+</div>
           )}
-          {visible.map((f) => {
-            const render = renderFor(f.key, f);
-            const value = row[f.key];
-            return (
-              <div key={f.key} className="dgp-md-row">
-                <dt>{f.name}</dt>
-                <dd>
-                  {isBlankValue(value) ? (
-                    <span className="dgp-ci-empty">—</span>
-                  ) : render ? (
-                    render({ row })
-                  ) : Array.isArray(value) ? (
-                    value.join(", ")
-                  ) : (
-                    String(value)
-                  )}
-                </dd>
-              </div>
-            );
-          })}
         </div>
 
         <footer className="dgp-modal-foot">
@@ -3012,6 +3148,7 @@ export default function DataGridPage({
           row={detailRow}
           cfg={cardCfg}
           fields={orderedFields}
+          resource={resource}
           onClose={() => setDetailRow(null)}
         />
       )}

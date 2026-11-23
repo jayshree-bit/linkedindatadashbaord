@@ -7,6 +7,9 @@ import mongoose from 'mongoose';
 import { logUserActivity } from "../services/userActivity.service.js";
 import { emitImportCompleted } from '../utils/importNotifications.js';
 const PY_URL = process.env.PY_SCRAPER_URL || "http://192.168.1.142:8000";
+const DOMAIN_HISTORY_API_URL =
+  process.env.DOMAIN_HISTORY_API_URL ||
+  "http://192.168.1.142:7000/api/history";
 import LinkedinUpdateLog from '../models/LinkedinUpdateLog.js';
 
 const IST = '+05:30';
@@ -189,6 +192,53 @@ const wrap = (fn) => async (req, res, next) => {
 // req.query carries page, limit, search, sortBy, sortOrder and filters.
 export const getAll = wrap((req) => svc.list(req.params.resource, req.query));
 
+export const getCompanyDomainHistory = async (req, res, next) => {
+  const domain =
+    typeof req.query.domain === "string" ? req.query.domain.trim() : "";
+
+  if (!domain || domain.length > 253) {
+    return res.status(400).json({ message: "A valid domain is required." });
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const historyUrl = new URL(DOMAIN_HISTORY_API_URL);
+    historyUrl.searchParams.set("domain", domain);
+
+    const response = await fetch(historyUrl, { signal: controller.signal });
+    if (!response.ok) {
+      return res.status(502).json({
+        message: "The domain history service could not complete the request.",
+      });
+    }
+
+    let result;
+    try {
+      result = await response.json();
+    } catch {
+      return res.status(502).json({
+        message: "The domain history service returned an invalid response.",
+      });
+    }
+
+    if (!result || !Array.isArray(result.rows)) {
+      return res.status(502).json({
+        message: "The domain history service returned an invalid response.",
+      });
+    }
+
+    return res.json(result);
+  } catch (error) {
+    if (error.name === "AbortError") {
+      return res.status(504).json({ message: "Domain history request timed out." });
+    }
+    return next(error);
+  } finally {
+    clearTimeout(timeout);
+  }
+};
 
 export const add = wrap((req) => svc.create(req.params.resource, req.body));
 

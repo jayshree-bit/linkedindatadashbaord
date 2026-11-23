@@ -41,6 +41,11 @@ r.put(
 const resource = (req) => req.params.resource;
 const action = (req) => (req.method === "GET" ? "view" : "edit");
 r.get("/data/:resource", authorize(resource, action), data.getAll);
+r.get(
+  "/company/domain-history",
+  authorize("company", "view"),
+  data.getCompanyDomainHistory
+);
 r.get("/data/:resource/export", authorize(resource, action), data.exportExcel);
 r.get("/data/:resource/export-start", authorize(resource, action), data.startExport);
 r.get("/data/:resource/export-status/:jobId", authorize(resource, action), data.exportStatus);

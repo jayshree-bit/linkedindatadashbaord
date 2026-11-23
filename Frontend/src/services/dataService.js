@@ -1,5 +1,10 @@
 import api from './apiClient';
 
+export const getDomainHistoryApi = (domain) =>
+  api
+    .get('/private/company/domain-history', { params: { domain } })
+    .then((response) => response.data);
+
 // Fetch paginated, searchable, sortable, column-filtered records.
 export const getRowsApi = (
   resource,
