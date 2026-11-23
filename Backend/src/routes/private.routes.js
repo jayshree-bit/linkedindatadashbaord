@@ -70,6 +70,11 @@ r.get(
 );
 r.post("/:resource/update-linkedin",authorize("prospect", "view"), data.updateLinkedinProfiles);
 r.get("/update-linkedin/:jobId", authorize("prospect", "view"),data.linkedinUpdateStatus);
+r.get(
+  "/prospect/linkedin-auto-update/status",
+  authorize("prospect", "view"),
+  data.linkedinAutoUpdateStatus
+);
 const excelUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 100 * 1024 * 1024 },
@@ -148,6 +153,16 @@ r.get(
 );
 
 r.get('/prospect/linkedin-logs', data.getLinkedinLogs);
+r.get(
+  '/prospect/linkedin-logs/report',
+  authorize('prospect', 'view'),
+  data.getLinkedinStatusReport
+);
+r.get(
+  '/prospect/linkedin-logs/report/export',
+  authorize('prospect', 'view'),
+  data.exportLinkedinStatusReport
+);
 r.get('/prospect/linkedin-logs/export', data.exportLinkedinLogs);
 
 r.post('/prospect/delete', authorize('prospect', 'edit'), data.deleteProspects);

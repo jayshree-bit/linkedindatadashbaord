@@ -1425,7 +1425,20 @@ export const linkedinUpdateStatus = async (req, res, next) => {
   }
 };
 
-
+export const linkedinAutoUpdateStatus = async (req, res, next) => {
+  try {
+    const response = await fetch(`${PY_URL}/api/prospects/auto-update/status`);
+    const data = await response.json();
+    if (!response.ok) {
+      return res.status(response.status).json({
+        message: data.detail || "Could not read LinkedIn scheduler status.",
+      });
+    }
+    return res.json(data);
+  } catch (error) {
+    return next(error);
+  }
+};
 
 const buildLogQuery = ({ from, to, jobId }) => {
   const q = {};
@@ -1436,6 +1449,120 @@ const buildLogQuery = ({ from, to, jobId }) => {
     if (to) q.createdAt.$lte = new Date(`${to}T23:59:59.999${IST}`);
   }
   return q;
+};
+
+const LINKEDIN_REPORT_STATUSES = [
+  { key: "updated", label: "Nurture Updated" },
+  { key: "company_changed", label: "Company Changed" },
+  { key: "title_changed", label: "Title Changed" },
+  { key: "disqualified", label: "Disqualified" },
+  { key: "failed", label: "Failed" },
+  { key: "skipped", label: "Skipped" },
+  { key: "other", label: "Other" },
+];
+
+const isValidReportDate = (value) => {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+};
+
+const parseLinkedinReportOptions = (query) => {
+  const { period, from, to } = query;
+  if (!["daily", "monthly", "quarterly"].includes(period)) {
+    return { error: "Period must be daily, monthly, or quarterly." };
+  }
+  if ((from && !isValidReportDate(from)) || (to && !isValidReportDate(to))) {
+    return { error: "Dates must use the YYYY-MM-DD format." };
+  }
+  if (from && to && from > to) {
+    return { error: '"From" date must be on or before "To" date.' };
+  }
+  return { period, from, to };
+};
+
+const createLinkedinStatusReport = async ({ period, from, to }) => {
+  const localDate = { date: "$createdAt", timezone: "Asia/Kolkata" };
+  let periodExpression;
+
+  if (period === "daily") {
+    periodExpression = {
+      $dateToString: {
+        format: "%Y-%m-%d",
+        date: "$createdAt",
+        timezone: "Asia/Kolkata",
+      },
+    };
+  } else if (period === "monthly") {
+    periodExpression = {
+      $dateToString: {
+        format: "%Y-%m",
+        date: "$createdAt",
+        timezone: "Asia/Kolkata",
+      },
+    };
+  } else {
+    periodExpression = {
+      $concat: [
+        { $toString: { $year: localDate } },
+        "-Q",
+        {
+          $toString: {
+            $ceil: { $divide: [{ $month: localDate }, 3] },
+          },
+        },
+      ],
+    };
+  }
+
+  const grouped = await LinkedinUpdateLog.aggregate([
+    { $match: buildLogQuery({ from, to }) },
+    {
+      $group: {
+        _id: {
+          period: periodExpression,
+          status: { $ifNull: ["$status", ""] },
+        },
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+  const statusKeys = LINKEDIN_REPORT_STATUSES.map(({ key }) => key);
+  const rowsByPeriod = new Map();
+  const totals = { total: 0, ...Object.fromEntries(statusKeys.map((key) => [key, 0])) };
+
+  for (const entry of grouped) {
+    const periodKey = entry._id.period;
+    const statusKey = statusKeys.includes(entry._id.status)
+      ? entry._id.status
+      : "other";
+    let row = rowsByPeriod.get(periodKey);
+    if (!row) {
+      row = {
+        period: periodKey,
+        total: 0,
+        ...Object.fromEntries(statusKeys.map((key) => [key, 0])),
+      };
+      rowsByPeriod.set(periodKey, row);
+    }
+
+    row.total += entry.count;
+    row[statusKey] += entry.count;
+    totals.total += entry.count;
+    totals[statusKey] += entry.count;
+  }
+
+  return {
+    period,
+    timezone: "Asia/Kolkata",
+    statuses: LINKEDIN_REPORT_STATUSES,
+    rows: [...rowsByPeriod.values()].sort((a, b) =>
+      a.period.localeCompare(b.period),
+    ),
+    totals,
+  };
 };
 
 export const getLinkedinLogs = async (req, res, next) => {
@@ -1450,6 +1577,65 @@ export const getLinkedinLogs = async (req, res, next) => {
     res.json({ rows, page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) });
   } catch (e) {
     next(e);
+  }
+};
+
+export const getLinkedinStatusReport = async (req, res, next) => {
+  const options = parseLinkedinReportOptions(req.query);
+  if (options.error) {
+    return res.status(400).json({ message: options.error });
+  }
+
+  try {
+    return res.json(await createLinkedinStatusReport(options));
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const exportLinkedinStatusReport = async (req, res, next) => {
+  const options = parseLinkedinReportOptions(req.query);
+  if (options.error) {
+    return res.status(400).json({ message: options.error });
+  }
+
+  try {
+    const report = await createLinkedinStatusReport(options);
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("LinkedIn Status Report");
+    const columns = [
+      { header: "Period", key: "period", width: 18 },
+      { header: "Total", key: "total", width: 12 },
+      ...LINKEDIN_REPORT_STATUSES.map(({ key, label }) => ({
+        header: label,
+        key,
+        width: Math.max(14, label.length + 2),
+      })),
+    ];
+    sheet.columns = columns;
+    sheet.getRow(1).font = { bold: true };
+    for (const row of report.rows) sheet.addRow(row);
+    sheet.addRow({ period: "TOTAL", ...report.totals }).font = { bold: true };
+    sheet.autoFilter = {
+      from: "A1",
+      to: `${String.fromCharCode(64 + columns.length)}1`,
+    };
+    sheet.views = [{ state: "frozen", ySplit: 1 }];
+
+    const dateSuffix = [options.from, options.to].filter(Boolean).join("-to-") || "all";
+    const filename = `linkedin-update-${options.period}-report-${dateSuffix}.xlsx`;
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${filename}"`,
+    );
+    await workbook.xlsx.write(res);
+    return res.end();
+  } catch (error) {
+    return next(error);
   }
 };
 

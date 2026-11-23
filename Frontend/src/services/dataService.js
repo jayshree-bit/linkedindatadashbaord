@@ -283,6 +283,8 @@ export const getLinkedinUpdateStatusApi = (jobId) =>
     .get(`/private/update-linkedin/${encodeURIComponent(jobId)}`)
     .then((r) => r.data);
 
+export const getLinkedinAutoUpdateStatusApi = () =>
+  api.get("/private/prospect/linkedin-auto-update/status").then((r) => r.data);
 
 export const getLinkedinLogsApi = (params) =>
   api.get("/private/prospect/linkedin-logs", { params }).then((r) => r.data);
@@ -291,6 +293,19 @@ export const getLinkedinLogsApi = (params) =>
 export const exportLinkedinLogsApi = (params) =>
   api
     .get("/private/prospect/linkedin-logs/export", { params, responseType: "blob" })
+    .then((r) => r.data);
+
+export const getLinkedinStatusReportApi = (params) =>
+  api
+    .get("/private/prospect/linkedin-logs/report", { params })
+    .then((r) => r.data);
+
+export const exportLinkedinStatusReportApi = (params) =>
+  api
+    .get("/private/prospect/linkedin-logs/report/export", {
+      params,
+      responseType: "blob",
+    })
     .then((r) => r.data);
 
     // Archive to the disqualified list, then delete (server only accepts DisQualified rows).

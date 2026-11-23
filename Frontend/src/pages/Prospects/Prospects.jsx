@@ -1,12 +1,16 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useSelector } from 'react-redux';
 import DataGridPage from '../../components/DataGridPage';
 import DateRangeFilter from '../../components/DateRangeFilter';
 import LinkedinLogPanel from '../../components/LinkedinLogPanel';
+import LinkedinAutoUpdateStatus from '../../components/LinkedinAutoUpdateStatus';
+import { can } from '../../features/authSlice';
 export const prospectFields = [
   { key: 'employeeCode', name: 'Employee Code' },
   { key: 'employeeName', name: 'Employee Name' },
   { key: 'date', name: 'Date' },
+  { key: 'linkedinLastUpdatedAt', name: 'LinkedIn Last Updated' },
   { key: 'campaign', name: 'Campaign' },
   { key: 'firstName', name: 'First Name' },
   { key: 'lastName', name: 'Last Name' },
@@ -92,6 +96,10 @@ const cardConfig = {
 };
 export default function Prospects() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const user = useSelector((state) => state.auth.user);
+  const [selectedProspects, setSelectedProspects] = useState([]);
+  const [linkedinUpdateTrigger, setLinkedinUpdateTrigger] = useState(0);
+  const [linkedinUpdateBusy, setLinkedinUpdateBusy] = useState(false);
   const statusFilter = searchParams.get('status') || '';
   const userId = searchParams.get('userId') || '';
   const employee = searchParams.get('employee') || '';
@@ -151,6 +159,12 @@ export default function Prospects() {
 const DEFAULT_SORT = [{ columnKey: 'updatedAt', direction: 'DESC' }];
   return (
     <>
+      <LinkedinAutoUpdateStatus
+        canRun={can(user, 'prospect', 'edit') && tab !== 'log'}
+        selectedProspects={selectedProspects}
+        linkedinUpdateBusy={linkedinUpdateBusy}
+        onRunSelected={() => setLinkedinUpdateTrigger((trigger) => trigger + 1)}
+      />
       <div className="dgp-tabs" role="tablist">
         {[
           ['all', 'All Data'],
@@ -185,6 +199,9 @@ const DEFAULT_SORT = [{ columnKey: 'updatedAt', direction: 'DESC' }];
           fixedFilters={fixedFilters}
           cardConfig={cardConfig}
           defaultSort={DEFAULT_SORT}
+          onSelectedRecordsChange={setSelectedProspects}
+          linkedinUpdateTrigger={linkedinUpdateTrigger}
+          onLinkedinBusyChange={setLinkedinUpdateBusy}
         />
       )}
     </>

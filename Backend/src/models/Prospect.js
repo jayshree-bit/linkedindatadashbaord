@@ -5,6 +5,8 @@ const prospectSchema = new mongoose.Schema(
     employeeCode: { type: String, trim: true, default: "" },
     employeeName: { type: String, trim: true, default: "" },
     date: { type: Date, default: null },
+    linkedinLastUpdatedAt: { type: Date, default: null },
+    linkedinLastAttemptAt: { type: Date, default: null },
     campaign: { type: String, trim: true, default: "" },
 
     firstName: { type: String, trim: true, default: "" },
@@ -107,4 +109,6 @@ const prospectSchema = new mongoose.Schema(
 );
 prospectSchema.index({ createdAt: -1, _id: -1 });
 prospectSchema.index({ uploadedBy: 1, status: 1 });
+prospectSchema.index({ status: 1, linkedinLastUpdatedAt: 1, date: 1 });
+prospectSchema.index({ linkedinLastAttemptAt: 1 });
 export default mongoose.model("Prospect", prospectSchema);

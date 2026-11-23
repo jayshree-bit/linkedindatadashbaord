@@ -14,6 +14,9 @@
 #                                 newest first) and set status = DisQualified
 #
 # note1 gets:  "Update Profile - <what was updated>"
+import asyncio
+import calendar
+import logging
 import os
 import re
 import time
@@ -82,6 +85,18 @@ CHROME_PROFILE_DIR = os.getenv("CHROME_PROFILE_DIR", r"C:\chrome-debug-profile")
 # ---------------- Limits ----------------
 MAX_IDS_PER_JOB = 200
 DAILY_PROFILE_LIMIT = int(os.getenv("LINKEDIN_DAILY_LIMIT", "80"))  # profile views per day
+AUTO_UPDATE_DAILY_LIMIT = 25
+AUTO_UPDATE_HOUR_IST = 2
+AUTO_UPDATE_MINUTE_IST = 30
+AUTO_UPDATE_ONE_TIME_RUN_AT = os.getenv(
+    "LINKEDIN_AUTO_UPDATE_ONCE_AT",
+    "2026-11-24T02:40:00+05:30",
+).strip()
+AUTO_UPDATE_RETRY_DAYS = 7
+AUTO_UPDATE_ENABLED = (
+    os.getenv("LINKEDIN_AUTO_UPDATE_ENABLED", "true").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
 MAX_CONSECUTIVE_BAD = 8      # stop the job after this many failed/skipped in a row
 LONG_BREAK_EVERY = 20        # extra pause after every N records
 NOTE_TEXT = "Update Profile"
@@ -92,6 +107,20 @@ STATUS_DISQUALIFIED = "DisQualified"
 
 JOBS: dict = {}
 SCRAPE_LOCK = threading.Lock()
+logger = logging.getLogger(__name__)
+AUTO_UPDATE_STATE = {
+    "enabled": AUTO_UPDATE_ENABLED,
+    "state": "scheduled" if AUTO_UPDATE_ENABLED else "disabled",
+    "nextRunAt": None,
+    "oneTimeRunAt": AUTO_UPDATE_ONE_TIME_RUN_AT or None,
+    "lastRunAt": None,
+    "lastFinishedAt": None,
+    "jobId": None,
+    "processed": 0,
+    "total": 0,
+    "queue": [],
+    "message": "",
+}
 
 # Month is optional so year-only ranges like "2015 - 2018" also match.
 DATE_RE = re.compile(
@@ -352,10 +381,12 @@ def not_footer(t: str) -> bool:
 # ======================================================================
 # Daily profile-view budget
 # ======================================================================
-def _today() -> str:
-    return datetime.now().strftime("%Y-%m-%d")
-
 IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _today() -> str:
+    return datetime.now(IST).strftime("%Y-%m-%d")
+
 
 def today_date() -> datetime:
     """Today's date in IST, stored as midnight UTC.
@@ -1482,6 +1513,7 @@ def run_job(job_id: str, ids: List[str]):
         try:
             driver = get_driver()
             for sid in ids:
+                job["currentId"] = sid
                 name = sid
                 doc = None
                 try:
@@ -1496,7 +1528,11 @@ def run_job(job_id: str, ids: List[str]):
                             ),
                         }
                     else:
-                        name = f"{doc.get('firstName', '')} {doc.get('lastName', '')}".strip() or sid
+                        name = (
+                            f"{doc.get('firstName', '')} {doc.get('lastName', '')}".strip()
+                            or doc.get("employeeName")
+                            or sid
+                        )
                         job["current"] = name
                         try:
                             res = update_one(driver, doc)
@@ -1520,9 +1556,26 @@ def run_job(job_id: str, ids: List[str]):
                         pass
 
                 write_log(job_id, sid, name, doc, res)
+                if doc:
+                    attempted_at = datetime.now(timezone.utc)
+                    update_fields = {"linkedinLastAttemptAt": attempted_at}
+                    if res.get("status") in {
+                        "updated",
+                        "company_changed",
+                        "title_changed",
+                        "disqualified",
+                    }:
+                        update_fields["linkedinLastUpdatedAt"] = attempted_at
+                    prospects.update_one(
+                        {"_id": doc["_id"]},
+                        {"$set": update_fields},
+                    )
                 job["results"].append({"id": sid, "name": name, **res})
                 job["processed"] += 1
+                if job.get("automatic"):
+                    AUTO_UPDATE_STATE["processed"] = job["processed"]
                 job["current"] = ""
+                job["currentId"] = ""
                 bad_in_a_row = bad_in_a_row + 1 if res["status"] in ("failed", "skipped") else 0
                 if bad_in_a_row >= MAX_CONSECUTIVE_BAD:
                     job["state"] = "stopped"
@@ -1540,6 +1593,244 @@ def run_job(job_id: str, ids: List[str]):
             job["state"] = "failed"
             job["error"] = str(e)
         # Do NOT call driver.quit(): that would close your logged-in Chrome.
+
+
+def _six_months_before(value: datetime) -> datetime:
+    month = value.month - 6
+    year = value.year
+    if month <= 0:
+        month += 12
+        year -= 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
+
+
+def _get_automatic_update_queue(remaining=None):
+    if remaining is None:
+        remaining = max(0, DAILY_PROFILE_LIMIT - views_today())
+    limit = min(MAX_IDS_PER_JOB, AUTO_UPDATE_DAILY_LIMIT, remaining)
+    if not limit:
+        return []
+
+    now = datetime.now(timezone.utc)
+    cutoff = _six_months_before(now)
+    retry_before = now - timedelta(days=AUTO_UPDATE_RETRY_DAYS)
+    stale_filter = {
+        "$or": [
+            {"linkedinLastUpdatedAt": {"$lte": cutoff}},
+            {
+                "$and": [
+                    {
+                        "$or": [
+                            {"linkedinLastUpdatedAt": None},
+                            {"linkedinLastUpdatedAt": {"$exists": False}},
+                        ]
+                    },
+                    {"date": {"$type": "date", "$lte": cutoff}},
+                ]
+            },
+        ]
+    }
+    retry_filter = {
+        "$or": [
+            {"linkedinLastAttemptAt": None},
+            {"linkedinLastAttemptAt": {"$exists": False}},
+            {"linkedinLastAttemptAt": {"$lte": retry_before}},
+        ]
+    }
+    query = {
+        "status": STATUS_QUALIFIED,
+        "linkedinProfileLink": {"$type": "string", "$nin": ["", "-"]},
+        "$and": [stale_filter, retry_filter],
+    }
+    records = list(
+        prospects.find(
+            query,
+            {"_id": 1, "firstName": 1, "lastName": 1, "employeeName": 1},
+        )
+        .sort([("linkedinLastUpdatedAt", 1), ("date", 1), ("_id", 1)])
+        .limit(limit)
+    )
+    return [
+        {
+            "id": str(record["_id"]),
+            "name": " ".join(
+                part
+                for part in (
+                    str(record.get("firstName") or "").strip(),
+                    str(record.get("lastName") or "").strip(),
+                )
+                if part
+            )
+            or str(record.get("employeeName") or "").strip()
+            or str(record["_id"]),
+        }
+        for record in records
+    ]
+
+
+def run_automatic_linkedin_update():
+    started_at = datetime.now(timezone.utc)
+    AUTO_UPDATE_STATE.update(
+        state="checking",
+        lastRunAt=started_at,
+        lastFinishedAt=None,
+        jobId=None,
+        processed=0,
+        total=0,
+        queue=[],
+        message="Checking for stale Qualified prospects.",
+    )
+
+    if SCRAPE_LOCK.locked() or any(
+        job.get("state") == "running" for job in JOBS.values()
+    ):
+        AUTO_UPDATE_STATE.update(
+            state="skipped",
+            lastFinishedAt=datetime.now(timezone.utc),
+            message="Skipped because another LinkedIn update job is running.",
+        )
+        print("[LINKEDIN AUTO UPDATE] Skipping: another update job is running.")
+        return
+
+    try:
+        remaining = max(0, DAILY_PROFILE_LIMIT - views_today())
+    except Exception as error:
+        logger.exception("[LINKEDIN AUTO UPDATE] Could not read today's usage.")
+        AUTO_UPDATE_STATE.update(
+            state="failed",
+            lastFinishedAt=datetime.now(timezone.utc),
+            message=str(error),
+        )
+        return
+    if not remaining:
+        AUTO_UPDATE_STATE.update(
+            state="skipped",
+            lastFinishedAt=datetime.now(timezone.utc),
+            message="Skipped because today's profile-view limit is used.",
+        )
+        print("[LINKEDIN AUTO UPDATE] Skipping: today's profile-view limit is used.")
+        return
+
+    try:
+        queue = _get_automatic_update_queue(remaining)
+    except Exception as error:
+        logger.exception("[LINKEDIN AUTO UPDATE] Could not query stale prospects.")
+        AUTO_UPDATE_STATE.update(
+            state="failed",
+            lastFinishedAt=datetime.now(timezone.utc),
+            message=str(error),
+        )
+        return
+
+    AUTO_UPDATE_STATE.update(queue=queue, total=len(queue))
+    ids = [item["id"] for item in queue]
+    if not ids:
+        AUTO_UPDATE_STATE.update(
+            state="completed",
+            lastFinishedAt=datetime.now(timezone.utc),
+            message="No stale Qualified prospects found.",
+        )
+        print("[LINKEDIN AUTO UPDATE] No stale Qualified prospects found.")
+        return
+
+    job_id = str(uuid.uuid4())
+    JOBS[job_id] = {
+        "state": "running",
+        "total": len(ids),
+        "processed": 0,
+        "results": [],
+        "error": None,
+        "current": "",
+        "currentId": "",
+        "queue": queue,
+        "automatic": True,
+    }
+    AUTO_UPDATE_STATE.update(
+        state="running",
+        jobId=job_id,
+        processed=0,
+        total=len(ids),
+        message="LinkedIn refresh is running.",
+    )
+    print(f"[LINKEDIN AUTO UPDATE] Starting refresh for {len(ids)} prospect(s).")
+    run_job(job_id, ids)
+    completed_job = JOBS[job_id]
+    AUTO_UPDATE_STATE.update(
+        state=completed_job["state"],
+        processed=completed_job["processed"],
+        total=completed_job["total"],
+        lastFinishedAt=datetime.now(timezone.utc),
+        message=completed_job.get("error") or "LinkedIn refresh finished.",
+    )
+    print(
+        f"[LINKEDIN AUTO UPDATE] Job {job_id} {completed_job['state']}: "
+        f"{completed_job['processed']}/{completed_job['total']} processed."
+    )
+
+
+async def automatic_linkedin_update_scheduler():
+    one_time_run = None
+    if AUTO_UPDATE_ONE_TIME_RUN_AT:
+        try:
+            one_time_run = datetime.fromisoformat(AUTO_UPDATE_ONE_TIME_RUN_AT)
+            if one_time_run.tzinfo is None:
+                one_time_run = one_time_run.replace(tzinfo=IST)
+            one_time_run = one_time_run.astimezone(IST)
+        except ValueError:
+            AUTO_UPDATE_STATE.update(
+                state="failed",
+                message="Invalid LINKEDIN_AUTO_UPDATE_ONCE_AT value.",
+            )
+            logger.exception("[LINKEDIN AUTO UPDATE] Invalid one-time schedule.")
+            return
+
+    while True:
+        now = datetime.now(IST)
+        regular_run = now.replace(
+            hour=AUTO_UPDATE_HOUR_IST,
+            minute=AUTO_UPDATE_MINUTE_IST,
+            second=0,
+            microsecond=0,
+        )
+        if regular_run <= now:
+            regular_run += timedelta(days=1)
+
+        if one_time_run is not None and one_time_run <= now:
+            one_time_run = None
+            AUTO_UPDATE_STATE["oneTimeRunAt"] = None
+
+        one_time_is_next = (
+            one_time_run is not None and one_time_run <= regular_run
+        )
+        next_run = one_time_run if one_time_is_next else regular_run
+
+        AUTO_UPDATE_STATE["nextRunAt"] = next_run
+        await asyncio.sleep((next_run - now).total_seconds())
+        if one_time_is_next:
+            one_time_run = None
+            AUTO_UPDATE_STATE["oneTimeRunAt"] = None
+            now = datetime.now(IST)
+            next_daily = now.replace(
+                hour=AUTO_UPDATE_HOUR_IST,
+                minute=AUTO_UPDATE_MINUTE_IST,
+                second=0,
+                microsecond=0,
+            )
+            if next_daily <= now:
+                next_daily += timedelta(days=1)
+            AUTO_UPDATE_STATE["nextRunAt"] = next_daily
+        else:
+            AUTO_UPDATE_STATE["nextRunAt"] = regular_run + timedelta(days=1)
+        try:
+            await asyncio.to_thread(run_automatic_linkedin_update)
+        except Exception:
+            AUTO_UPDATE_STATE.update(
+                state="failed",
+                lastFinishedAt=datetime.now(timezone.utc),
+                message="Scheduled LinkedIn refresh failed. Check service logs.",
+            )
+            logger.exception("[LINKEDIN AUTO UPDATE] Scheduled run failed.")
 
 
 # ======================================================================
@@ -1568,6 +1859,41 @@ def start_update(body: UpdateRequest, bg: BackgroundTasks):
 def update_usage():
     used = views_today()
     return {"usedToday": used, "dailyLimit": DAILY_PROFILE_LIMIT, "remaining": max(0, DAILY_PROFILE_LIMIT - used)}
+
+
+@router.get("/auto-update/status")
+def automatic_update_status():
+    job = JOBS.get(AUTO_UPDATE_STATE.get("jobId"), {})
+    if job:
+        queue = job.get("queue", [])
+    elif AUTO_UPDATE_STATE.get("state") in {"checking", "running"}:
+        queue = AUTO_UPDATE_STATE.get("queue", [])
+    elif not AUTO_UPDATE_ENABLED:
+        queue = []
+    else:
+        queue = _get_automatic_update_queue()
+    results = job.get("results", [])
+    current = job.get("current", "")
+    current_id = job.get("currentId", "")
+    return {
+        **AUTO_UPDATE_STATE,
+        "scheduleTime": f"{AUTO_UPDATE_HOUR_IST:02d}:{AUTO_UPDATE_MINUTE_IST:02d}",
+        "timezone": "Asia/Kolkata",
+        "oneTimeRunAt": AUTO_UPDATE_STATE.get("oneTimeRunAt"),
+        "prospectLimit": AUTO_UPDATE_DAILY_LIMIT,
+        "usedToday": views_today(),
+        "dailyLimit": DAILY_PROFILE_LIMIT,
+        "remainingToday": max(0, DAILY_PROFILE_LIMIT - views_today()),
+        "queue": queue,
+        "results": results,
+        "current": current,
+        "currentId": current_id,
+        "waiting": (
+            max(0, len(queue) - len(results) - (1 if current_id else 0))
+            if job
+            else len(queue)
+        ),
+    }
 
 
 @router.get("/update-linkedin/{job_id}")

@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import DateRangeFilter from "./DateRangeFilter";
-import { getLinkedinLogsApi, exportLinkedinLogsApi } from "../services/dataService";
+import {
+  getLinkedinLogsApi,
+  exportLinkedinLogsApi,
+  getLinkedinStatusReportApi,
+  exportLinkedinStatusReportApi,
+} from "../services/dataService";
 import ChangeDiff from "./ChangeDiff";
 export const saveBlob = (blob, name) => {
   const url = URL.createObjectURL(blob);
@@ -14,6 +19,20 @@ export const saveBlob = (blob, name) => {
 };
 
 const PAGE_SIZE = 20;
+const REPORT_PERIODS = [
+  { key: "daily", label: "Daily" },
+  { key: "monthly", label: "Monthly" },
+  { key: "quarterly", label: "Quarterly" },
+];
+const REPORT_COLUMNS = [
+  { key: "updated", label: "Nurture Updated" },
+  { key: "company_changed", label: "Company Changed" },
+  { key: "title_changed", label: "Title Changed" },
+  { key: "disqualified", label: "Disqualified" },
+  { key: "failed", label: "Failed" },
+  { key: "skipped", label: "Skipped" },
+  { key: "other", label: "Other" },
+];
 
 // Full class strings (not built dynamically) so Tailwind keeps them in the build.
 const STATUS_STYLES = {
@@ -58,6 +77,11 @@ export default function LinkedinLogPanel() {
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState("");
+  const [reportPeriod, setReportPeriod] = useState("daily");
+  const [reportData, setReportData] = useState({ rows: [], totals: {} });
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportDownloading, setReportDownloading] = useState(false);
+  const [reportError, setReportError] = useState("");
 
   const { from, to } = range;
   const invalid = Boolean(from && to && from > to);
@@ -79,6 +103,31 @@ export default function LinkedinLogPanel() {
     load();
   }, [load]);
 
+  const loadReport = useCallback(async () => {
+    if (invalid) return;
+    setReportLoading(true);
+    setReportError("");
+    try {
+      setReportData(
+        await getLinkedinStatusReportApi({
+          period: reportPeriod,
+          from: from || undefined,
+          to: to || undefined,
+        }),
+      );
+    } catch (err) {
+      setReportError(
+        err?.response?.data?.message || err.message || "Could not load the report.",
+      );
+    } finally {
+      setReportLoading(false);
+    }
+  }, [from, to, invalid, reportPeriod]);
+
+  useEffect(() => {
+    loadReport();
+  }, [loadReport]);
+
   const changeRange = (next) => {
     setRange({ from: next.from || "", to: next.to || "" });
     setPage(1);
@@ -99,9 +148,153 @@ export default function LinkedinLogPanel() {
     }
   };
 
+  const downloadReport = async () => {
+    setReportDownloading(true);
+    setReportError("");
+    try {
+      const blob = await exportLinkedinStatusReportApi({
+        period: reportPeriod,
+        from: from || undefined,
+        to: to || undefined,
+      });
+      const tag = from || to ? `${from || "start"}_to_${to || "today"}` : "all";
+      saveBlob(blob, `linkedin-update-${reportPeriod}-report-${tag}.xlsx`);
+    } catch (err) {
+      setReportError(
+        err?.response?.data?.message || err.message || "Report download failed.",
+      );
+    } finally {
+      setReportDownloading(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
-      <DateRangeFilter from={from} to={to} onChange={changeRange} />
+      <DateRangeFilter
+        from={from}
+        to={to}
+        onChange={changeRange}
+        label="LinkedIn update date"
+      />
+
+      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              LinkedIn update status report
+            </h2>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Counts are grouped by period using India Standard Time.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div
+              className="inline-flex rounded-lg border border-gray-200 p-1 dark:border-gray-700"
+              role="group"
+              aria-label="Report period"
+            >
+              {REPORT_PERIODS.map(({ key, label }) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={reportPeriod === key}
+                  onClick={() => setReportPeriod(key)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                    reportPeriod === key
+                      ? "bg-indigo-600 text-white"
+                      : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={downloadReport}
+              disabled={
+                reportDownloading ||
+                reportLoading ||
+                invalid ||
+                reportData.rows.length === 0
+              }
+              className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {reportDownloading ? "Downloading..." : "Download report"}
+            </button>
+          </div>
+        </div>
+
+        {reportError && (
+          <div
+            className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300"
+            role="alert"
+          >
+            {reportError}
+          </div>
+        )}
+
+        <div className="w-full overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+              <tr>
+                <th className="px-3 py-2.5">Period</th>
+                <th className="px-3 py-2.5">Total</th>
+                {REPORT_COLUMNS.map(({ key, label }) => (
+                  <th key={key} className="whitespace-nowrap px-3 py-2.5">
+                    {label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 text-gray-800 dark:divide-gray-800 dark:text-gray-200">
+              {reportData.rows.map((row) => (
+                <tr key={row.period}>
+                  <td className="whitespace-nowrap px-3 py-2.5 font-medium">
+                    {row.period}
+                  </td>
+                  <td className="px-3 py-2.5 font-semibold">
+                    {row.total.toLocaleString()}
+                  </td>
+                  {REPORT_COLUMNS.map(({ key }) => (
+                    <td key={key} className="px-3 py-2.5">
+                      {(row[key] || 0).toLocaleString()}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {reportData.rows.length > 0 && (
+                <tr className="bg-gray-50 font-semibold dark:bg-gray-800/70">
+                  <td className="px-3 py-2.5">TOTAL</td>
+                  <td className="px-3 py-2.5">
+                    {(reportData.totals.total || 0).toLocaleString()}
+                  </td>
+                  {REPORT_COLUMNS.map(({ key }) => (
+                    <td key={key} className="px-3 py-2.5">
+                      {(reportData.totals[key] || 0).toLocaleString()}
+                    </td>
+                  ))}
+                </tr>
+              )}
+              {!reportLoading && reportData.rows.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={REPORT_COLUMNS.length + 2}
+                    className="px-3 py-6 text-center text-gray-500 dark:text-gray-400"
+                  >
+                    No LinkedIn update results for this range.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          {reportLoading && (
+            <div className="border-t border-gray-100 px-3 py-2 text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">
+              Loading report...
+            </div>
+          )}
+        </div>
+      </div>
 
       <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
         {/* Header */}

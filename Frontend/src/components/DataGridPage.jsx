@@ -1298,6 +1298,9 @@ export default function DataGridPage({
   headerActions,
   headerSubtitle,
   hideInternalTools = false,
+  onSelectedRecordsChange,
+  linkedinUpdateTrigger = 0,
+  onLinkedinBusyChange,
 }) {
   const dispatch = useDispatch();
   const toast = useToast();
@@ -1399,6 +1402,9 @@ export default function DataGridPage({
   const [jobStartedAt, setJobStartedAt] = useState(null);
   const [jobEndedAt, setJobEndedAt] = useState(null);
   const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    onLinkedinBusyChange?.(linkedinBusy);
+  }, [linkedinBusy, onLinkedinBusyChange]);
   // Timing stats for the LinkedIn job panel
   const elapsedMs = jobStartedAt ? (jobEndedAt ?? now) - jobStartedAt : 0;
   const doneCount = linkedinJob?.results?.length ?? 0;
@@ -1926,6 +1932,15 @@ export default function DataGridPage({
     Array.from(selectedRows)
       .map((id) => selectedCache.current.get(id))
       .filter(Boolean);
+
+  useEffect(() => {
+    onSelectedRecordsChange?.(getSelectedRecords());
+  }, [selectedRows, onSelectedRecordsChange]);
+
+  useEffect(
+    () => () => onSelectedRecordsChange?.([]),
+    [onSelectedRecordsChange],
+  );
   const handleExternalDeleteSelected = async () => {
     if (!externalData?.onDeleteSelected) return;
     try {
@@ -2199,6 +2214,28 @@ export default function DataGridPage({
       );
     }
   };
+
+  const linkedinUpdateTriggerRef = useRef(linkedinUpdateTrigger);
+  useEffect(() => {
+    if (linkedinUpdateTriggerRef.current === linkedinUpdateTrigger) return;
+    linkedinUpdateTriggerRef.current = linkedinUpdateTrigger;
+
+    if (
+      !externalMode &&
+      resource === "prospect" &&
+      !linkedinBusy &&
+      selectedRows.size > 0 &&
+      selectedRows.size <= 25
+    ) {
+      void updateLinkedinProfiles();
+    }
+  }, [
+    externalMode,
+    linkedinBusy,
+    linkedinUpdateTrigger,
+    resource,
+    selectedRows,
+  ]);
 
   // After a page refresh, pick the running job back up.
   useEffect(() => {

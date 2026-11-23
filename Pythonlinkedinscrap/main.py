@@ -19,7 +19,11 @@ from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from pymongo import MongoClient
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from linkedin_update import router as linkedin_update_router
+from linkedin_update import (
+    AUTO_UPDATE_ENABLED,
+    automatic_linkedin_update_scheduler,
+    router as linkedin_update_router,
+)
 
 # --- Paths and setup ---
 BASE_DIR = Path(__file__).resolve().parent
@@ -55,6 +59,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(linkedin_update_router)   # <-- here
+
+
+@app.on_event("startup")
+async def start_linkedin_auto_update_scheduler():
+    if AUTO_UPDATE_ENABLED:
+        app.state.linkedin_auto_update_task = asyncio.create_task(
+            automatic_linkedin_update_scheduler()
+        )
+
+
+@app.on_event("shutdown")
+async def stop_linkedin_auto_update_scheduler():
+    task = getattr(app.state, "linkedin_auto_update_task", None)
+    if task:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
 # Serve static files
 static_dir = BASE_DIR.parent / "static"
 static_dir.mkdir(parents=True, exist_ok=True)
